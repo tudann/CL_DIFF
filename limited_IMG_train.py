@@ -102,7 +102,7 @@ def create_argparser():
     defaults = dict(
         # ==== 运行相关 ====
         gpu_id=0,
-        save_path="/home/lqg/code_8T/24/lt/checkpoints/no_dab_25d",
+        save_path="/home/lqg/code_8T/24/lt/checkpoints/first_test",
 
         # ==== 数据相关 ====
         data_mode='npy',
