@@ -1,0 +1,32 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Editor
+.vscode/
+.idea/
+
+# Local agent metadata
+.agents/
+
+# Runtime outputs
+result/
+loss_data.csv
+
+# Model checkpoints
+checkpoints/
+*.pt
+*.pth
+
+# Temporary / backup files
+*.btr
+*~
+
+# Keep source only
+!limited_IMG_train.py
+!limited_IMG_sample.py
+!guided_diffusion/
+!guided_diffusion/**/*.py
+!guided_diffusion/__init__.py
+
