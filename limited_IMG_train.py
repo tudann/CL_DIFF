@@ -71,6 +71,10 @@ def main():
         crop_y_start=args.crop_y_start,
         crop_y_end=args.crop_y_end,
         use_mmap=args.use_mmap,
+        num_workers=args.num_workers,
+        pin_memory=args.pin_memory,
+        persistent_workers=args.persistent_workers,
+        shuffle=args.shuffle,
     )
 
     logger.log("training...")
@@ -116,6 +120,10 @@ def create_argparser():
         crop_y_start=127,
         crop_y_end=895,
         use_mmap=True,
+        num_workers=4,
+        pin_memory=True,
+        persistent_workers=True,
+        shuffle=False,
 
         # ==== 模型结构相关 ====
         image_size=768,

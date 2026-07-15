@@ -147,6 +147,10 @@ def load_CL_IMG_data(
         crop_y_start=127,
         crop_y_end=895,
         use_mmap=True,
+        num_workers=4,
+        pin_memory=True,
+        persistent_workers=True,
+        shuffle=False,
 ):
     if not data_dir1:
         raise ValueError("data_dir1 is required")
@@ -168,7 +172,10 @@ def load_CL_IMG_data(
     loader = DataLoader(
         dataset,
         batch_size=batch_size,
-        shuffle=(mode == "train"),
+        shuffle=shuffle,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        persistent_workers=(persistent_workers and num_workers > 0),
     )
 
     if mode == "train":

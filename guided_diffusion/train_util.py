@@ -138,8 +138,8 @@ class TrainLoop:
 
             img, bad_img, img_path= next(self.data)
 
-            img = th.tensor(img).to(device=self.device)
-            bad_img = th.tensor(bad_img).to(device=self.device)
+            img = img.to(device=self.device, non_blocking=True)
+            bad_img = bad_img.to(device=self.device, non_blocking=True)
             step_size = self.step
 
             self.run_step(img, bad_img, step_size)
@@ -147,7 +147,7 @@ class TrainLoop:
             if self.step % self.log_interval == 0:
                 logger.dumpkvs() 
 
-            if self.step % self.save_interval == 0:
+            if self.step > 0 and self.step % self.save_interval == 0:
                 self.save(self.data_mode)
 
             self.step += 1
