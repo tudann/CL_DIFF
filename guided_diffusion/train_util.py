@@ -196,7 +196,8 @@ class TrainLoop:
 
             if step_size % 100 == 0:
                 # 将损失值和步长写入 CSV 文件
-                with open("loss_data.csv", mode="a", newline="") as file:
+                loss_csv_path = os.path.join(self.save_path, "loss_data.csv")
+                with open(loss_csv_path, mode="a", newline="") as file:
                     writer = csv.writer(file)
                     writer.writerow([step_size, loss.item()])
             # Log the loss values

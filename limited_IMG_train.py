@@ -17,6 +17,8 @@ from guided_diffusion.train_util import TrainLoop  #训练核心循环逻辑；
 def main():
 
     args = create_argparser().parse_args()
+    if not os.path.isabs(args.save_path):
+        args.save_path = os.path.abspath(args.save_path)
 
     #device = dist_util.dev(args.gpu_id)
     device = th.device(f"cuda:{args.gpu_id}" if th.cuda.is_available() else "cpu")
@@ -102,7 +104,7 @@ def create_argparser():
     defaults = dict(
         # ==== 运行相关 ====
         gpu_id=0,
-        save_path="/home/lqg/code_8T/24/lt/checkpoints/first_test",
+        save_path="checkpoints/first_test",
 
         # ==== 数据相关 ====
         data_mode='npy',
