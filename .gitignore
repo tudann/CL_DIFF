@@ -13,6 +13,7 @@ __pycache__/
 # Runtime outputs
 result/
 loss_data.csv
+debug_data_preview/
 
 # Model checkpoints
 checkpoints/
@@ -26,7 +27,7 @@ checkpoints/
 # Keep source only
 !limited_IMG_train.py
 !limited_IMG_sample.py
+!check_training_data.py
 !guided_diffusion/
 !guided_diffusion/**/*.py
 !guided_diffusion/__init__.py
-
