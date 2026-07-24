@@ -31,6 +31,7 @@ class TrainLoop:
         ema_rate,
         log_interval,
         save_interval,
+        loss_log_interval,
         resume_checkpoint,
         resume_step,
         use_fp16=False,
@@ -58,6 +59,7 @@ class TrainLoop:
         )
         self.log_interval = log_interval
         self.save_interval = save_interval
+        self.loss_log_interval = loss_log_interval
         self.resume_checkpoint = resume_checkpoint
         self.use_fp16 = use_fp16
         self.fp16_scale_growth = fp16_scale_growth
@@ -140,7 +142,7 @@ class TrainLoop:
 
             img = img.to(device=self.device, non_blocking=True)
             bad_img = bad_img.to(device=self.device, non_blocking=True)
-            step_size = self.step
+            step_size = self.step + self.resume_step
 
             self.run_step(img, bad_img, step_size)
 
@@ -194,11 +196,17 @@ class TrainLoop:
             loss = (losses["loss"] * weights).mean()
             self.loss_history.append(loss.item())
 
-            if step_size % 100 == 0:
+            if self.loss_log_interval > 0 and step_size % self.loss_log_interval == 0:
                 # 将损失值和步长写入 CSV 文件
                 loss_csv_path = os.path.join(self.save_path, "loss_data.csv")
+                write_header = (
+                    not os.path.exists(loss_csv_path)
+                    or os.path.getsize(loss_csv_path) == 0
+                )
                 with open(loss_csv_path, mode="a", newline="") as file:
                     writer = csv.writer(file)
+                    if write_header:
+                        writer.writerow(["step", "loss"])
                     writer.writerow([step_size, loss.item()])
             # Log the loss values
             logger.logkv("loss", loss.item())

@@ -92,6 +92,7 @@ def main():
         device_id=device,
         log_interval=args.log_interval,
         save_interval=args.save_interval,
+        loss_log_interval=args.loss_log_interval,
 
         resume_checkpoint=args.resume_checkpoint,
         resume_step = args.resume_step,
@@ -162,6 +163,7 @@ def create_argparser():
         ema_rate="0,0.9999",
         log_interval=1000,
         save_interval=50000,
+        loss_log_interval=1,
         resume_checkpoint="",
         resume_step = 0,
         fp16_scale_growth=1e-3,
