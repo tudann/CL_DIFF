@@ -102,6 +102,59 @@ def indicate(img1, img2):
     return psnr(img1, img2, data_range=1), ssim(img1, img2, data_range=1), mse(img1, img2)
 
 
+def to_uint8(img):
+    return (normalize_image(img) * 255).astype(np.uint8)
+
+
+def draw_centered_text(canvas, text, x0, x1, y, font_scale=0.8, thickness=2):
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    (text_w, text_h), _ = cv2.getTextSize(text, font, font_scale, thickness)
+    x = x0 + max((x1 - x0 - text_w) // 2, 0)
+    cv2.putText(canvas, text, (x, y + text_h), font, font_scale, (0, 0, 0), thickness, cv2.LINE_AA)
+
+
+def save_comparison(path, cl_img, re_img, gt_img=None, metrics=None):
+    cl_u8 = to_uint8(cl_img)
+    re_u8 = to_uint8(re_img)
+    panels = [cl_u8, re_u8]
+    titles = ["CL-FDK input", "Diffusion result"]
+
+    if gt_img is not None:
+        panels.append(to_uint8(gt_img))
+        titles.append("CT-FDK target")
+
+    h, w = panels[0].shape
+    top_h = 78
+    gap = 12
+    canvas_w = len(panels) * w + (len(panels) - 1) * gap
+    canvas_h = top_h + h
+    canvas = np.full((canvas_h, canvas_w, 3), 255, dtype=np.uint8)
+
+    if metrics is not None:
+        p, s, m = metrics
+        metric_text = f"PSNR: {p:.2f}  SSIM: {s:.4f}  MSE(x1000): {m:.3f}"
+    else:
+        metric_text = "No CT label: metrics unavailable"
+    cv2.putText(
+        canvas,
+        metric_text,
+        (16, 30),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.82,
+        (0, 0, 0),
+        2,
+        cv2.LINE_AA,
+    )
+
+    for idx, (panel, title) in enumerate(zip(panels, titles)):
+        x0 = idx * (w + gap)
+        x1 = x0 + w
+        draw_centered_text(canvas, title, x0, x1, 44, font_scale=0.75, thickness=2)
+        canvas[top_h:top_h + h, x0:x1] = cv2.cvtColor(panel, cv2.COLOR_GRAY2BGR)
+
+    cv2.imwrite(path, canvas)
+
+
 def main():
     args = create_argparser().parse_args()
     device = th.device(f"cuda:{args.gpu_id}" if th.cuda.is_available() else "cpu")
@@ -156,7 +209,9 @@ def main():
 
     run_sampler = partial(diffusion.CL_IMG_sample_loop_test)
     re_dir = os.path.join(args.output_dir, "re")
+    comp_dir = os.path.join(args.output_dir, "comparison")
     os.makedirs(re_dir, exist_ok=True)
+    os.makedirs(comp_dir, exist_ok=True)
 
     metrics_list = []
     volume_slices = []
@@ -173,6 +228,7 @@ def main():
         cond_img = bad_img.to(device, non_blocking=True)
         center_channel = cond_img.shape[1] // 2
         start_img = cond_img[:, center_channel:center_channel + 1]
+        cl_img = np.squeeze(start_img[0, 0].detach().cpu().numpy())
         result_img = run_sampler(
             model=model,
             bad_img=start_img,
@@ -186,12 +242,18 @@ def main():
         re_path = os.path.join(re_dir, f"{img_name}_z{z_idx:03d}.png")
         cv2.imwrite(re_path, (normalize_image(result_img) * 255).astype(np.uint8))
 
+        gt_img = None
+        metrics = None
         if img is not None:
             gt_img = np.squeeze(img[0].numpy() if hasattr(img, "numpy") else img)
             result_img_norm = normalize_image(result_img)
             gt_img_norm = normalize_image(gt_img)
             p, s, m = indicate(result_img_norm[None, ...], gt_img_norm[None, ...])
-            metrics_list.append([f"{img_name}_z{z_idx:03d}", float(p), float(s), float(m) * 1000])
+            metrics = (float(p), float(s), float(m) * 1000)
+            metrics_list.append([f"{img_name}_z{z_idx:03d}", metrics[0], metrics[1], metrics[2]])
+
+        comp_path = os.path.join(comp_dir, f"{img_name}_z{z_idx:03d}_comparison.png")
+        save_comparison(comp_path, cl_img, result_img, gt_img=gt_img, metrics=metrics)
 
     if volume_slices:
         volume = np.stack(volume_slices, axis=-1)
@@ -207,13 +269,13 @@ def main():
 def create_argparser():
     defaults = dict(
         gpu_id=0,
-        input_npy="",
-        label_npy="",
+        input_npy="/home/lqg/code_8T/24/lt/data_make/CL-data_make/sim_pcb_test/cl_fdk_npy/test_phantom_0001_cl_fdk.npy",
+        label_npy="/home/lqg/code_8T/24/lt/data_make/CL-data_make/sim_pcb_test/ct_fdk_npy/test_phantom_0001_cl_fdk.npy",
         data_dir1="/home/lqg/code_8T/24/lt/data_make/CL-data_make/ct_label_npy",
         data_dir2="/home/lqg/code_8T/24/lt/data_make/CL-data_make/cl_label_npy",
         batch_size=1,
         model_path="/home/lqg/code_8T/24/lt/CL_DIFF_v1/checkpoints/first_test/ema_npy_0.9999_250000.pt",
-        output_dir="./result/npy",
+        output_dir="/home/lqg/code_8T/24/lt/CL_DIFF_v1/result/test_phantom_0001_250000",
         max_samples=0,
         slover_data="no",
         image_size=768,
