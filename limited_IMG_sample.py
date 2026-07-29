@@ -3,7 +3,9 @@ Sample reconstructed slices from paired CT/CL npy volumes.
 """
 import argparse
 import csv
+import glob
 import os
+import re
 
 import cv2
 import numpy as np
@@ -82,6 +84,83 @@ class SingleCLVolumeDataset:
             label_slice = normalize_image(label_slice)[None, :, :].astype(np.float32)
 
         return label_slice, cond_stack, f"{self.stem}_z{z:03d}"
+
+
+def natural_sort_key(path):
+    name = os.path.basename(path)
+    return [int(text) if text.isdigit() else text.lower() for text in re.split(r"(\d+)", name)]
+
+
+class SingleCLRawSliceDataset:
+    def __init__(
+        self,
+        input_raw_dir,
+        image_size=768,
+        num_input_slices=3,
+        crop_x=(127, 895),
+        crop_y=(127, 895),
+        raw_height=1024,
+        raw_width=1024,
+        raw_dtype="float32",
+        raw_pattern="*.raw",
+        raw_order="C",
+        volume_name="",
+    ):
+        if num_input_slices % 2 != 1:
+            raise ValueError("num_input_slices must be odd, e.g. 3 for [z-1,z,z+1].")
+
+        self.input_raw_dir = input_raw_dir
+        self.raw_files = sorted(glob.glob(os.path.join(input_raw_dir, raw_pattern)), key=natural_sort_key)
+        if not self.raw_files:
+            raise ValueError(f"No raw files found in {input_raw_dir} with pattern {raw_pattern}.")
+
+        self.image_size = image_size
+        self.num_input_slices = num_input_slices
+        self.crop_x = crop_x
+        self.crop_y = crop_y
+        self.raw_height = raw_height
+        self.raw_width = raw_width
+        self.raw_dtype = np.dtype(raw_dtype)
+        self.raw_order = raw_order
+        self.expected_values = raw_height * raw_width
+        self.stem = volume_name or os.path.basename(os.path.abspath(input_raw_dir))
+
+        crop_h = crop_x[1] - crop_x[0]
+        crop_w = crop_y[1] - crop_y[0]
+        if crop_h != image_size or crop_w != image_size:
+            raise ValueError(f"Crop size ({crop_h}, {crop_w}) does not match image_size={image_size}.")
+
+    def __len__(self):
+        return len(self.raw_files)
+
+    def __iter__(self):
+        for z in range(len(self)):
+            yield self[z]
+
+    def _read_raw_slice(self, z):
+        path = self.raw_files[z]
+        data = np.fromfile(path, dtype=self.raw_dtype)
+        if data.size != self.expected_values:
+            raise ValueError(
+                f"Raw file size mismatch: {path} has {data.size} values, "
+                f"expected {self.expected_values} for shape ({self.raw_height}, {self.raw_width})."
+            )
+        return data.reshape((self.raw_height, self.raw_width), order=self.raw_order)
+
+    def __getitem__(self, z):
+        z_count = len(self)
+        half = self.num_input_slices // 2
+        z_indices = [min(max(z + offset, 0), z_count - 1) for offset in range(-half, half + 1)]
+
+        x0, x1 = self.crop_x
+        y0, y1 = self.crop_y
+        cond_slices = [
+            np.asarray(self._read_raw_slice(zi)[x0:x1, y0:y1], dtype=np.float32)
+            for zi in z_indices
+        ]
+        cond_stack = np.stack([normalize_image(slice_) for slice_ in cond_slices], axis=0)
+        cond_stack = th.from_numpy(cond_stack[None, ...].astype(np.float32))
+        return None, cond_stack, f"{self.stem}_z{z:03d}"
 
 
 def indicate(img1, img2):
@@ -182,7 +261,21 @@ def main():
         model.convert_to_fp16()
     model.eval()
 
-    if args.input_npy:
+    if args.input_raw_dir:
+        data = SingleCLRawSliceDataset(
+            input_raw_dir=args.input_raw_dir,
+            image_size=args.image_size,
+            num_input_slices=args.condition_channels,
+            crop_x=(args.crop_x_start, args.crop_x_end),
+            crop_y=(args.crop_y_start, args.crop_y_end),
+            raw_height=args.raw_height,
+            raw_width=args.raw_width,
+            raw_dtype=args.raw_dtype,
+            raw_pattern=args.raw_pattern,
+            raw_order=args.raw_order,
+            volume_name=args.raw_volume_name,
+        )
+    elif args.input_npy:
         data = SingleCLVolumeDataset(
             input_npy=args.input_npy,
             label_npy=args.label_npy,
@@ -269,13 +362,20 @@ def main():
 def create_argparser():
     defaults = dict(
         gpu_id=0,
+        input_raw_dir="/home/lqg/code_8T/24/lt/data_make/17_360view/slice",
+        raw_height=1024,
+        raw_width=1024,
+        raw_dtype="float32",
+        raw_pattern="*.raw",
+        raw_order="C",
+        raw_volume_name="real_fdk",
         input_npy="/home/lqg/code_8T/24/lt/data_make/CL-data_make/sim_pcb_test/cl_fdk_npy/test_phantom_0001_cl_fdk.npy",
         label_npy="/home/lqg/code_8T/24/lt/data_make/CL-data_make/sim_pcb_test/ct_fdk_npy/test_phantom_0001_cl_fdk.npy",
         data_dir1="/home/lqg/code_8T/24/lt/data_make/CL-data_make/ct_label_npy",
         data_dir2="/home/lqg/code_8T/24/lt/data_make/CL-data_make/cl_label_npy",
         batch_size=1,
         model_path="/home/lqg/code_8T/24/lt/CL_DIFF_v1/checkpoints/first_test/ema_npy_0.9999_250000.pt",
-        output_dir="/home/lqg/code_8T/24/lt/CL_DIFF_v1/result/test_phantom_0001_250000",
+        output_dir="/home/lqg/code_8T/24/lt/CL_DIFF_v1/result/test_stub17_250000",
         max_samples=0,
         slover_data="no",
         image_size=768,
