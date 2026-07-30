@@ -109,13 +109,13 @@ def create_argparser():
     defaults = dict(
         # ==== 运行相关 ====
         gpu_id=0,
-        save_path="checkpoints/first_test",
+        save_path="checkpoints/phantom_label_guss",
 
         # ==== 数据相关 ====
         data_mode='npy',
         # data_dir1 is the CT-FDK label directory, data_dir2 is the CL-FDK input directory.
-        data_dir1="/home/lqg/code_8T/24/lt/data_make/CL-data_make/ct_label_npy",
-        data_dir2="/home/lqg/code_8T/24/lt/data_make/CL-data_make/cl_label_npy",
+        data_dir1="/home/lqg/code_8T/24/lt/data_make/CL-data_make/output/train_data/phantom_guss",
+        data_dir2="/home/lqg/code_8T/24/lt/data_make/CL-data_make/output/train_data/cl_label_npy",
         crop_x_start=127,
         crop_x_end=895,
         crop_y_start=127,
@@ -162,7 +162,7 @@ def create_argparser():
         microbatch=-1,
         ema_rate="0,0.9999",
         log_interval=1000,
-        save_interval=50000,
+        save_interval=30000,
         loss_log_interval=1,
         resume_checkpoint="",
         resume_step = 0,
