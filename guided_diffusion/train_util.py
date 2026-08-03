@@ -17,6 +17,28 @@ from .nn import update_ema
 from .resample import LossAwareSampler, UniformSampler
 INITIAL_LOG_LOSS_SCALE = 20.0
 
+
+class _AutocastModel(th.nn.Module):
+    """
+    Run the backbone under autocast while handing the diffusion math a float32
+    tensor.
+
+    Only the network forward is cast. The variational-bound terms in
+    ``gaussian_diffusion`` involve exp/log of accumulated products and are left
+    in float32, where they belong.
+    """
+
+    def __init__(self, model, dtype):
+        super().__init__()
+        self.model = model
+        self.dtype = dtype
+
+    def forward(self, *args, **kwargs):
+        with th.autocast(device_type="cuda", dtype=self.dtype):
+            out = self.model(*args, **kwargs)
+        return out.float()
+
+
 class TrainLoop:
     def __init__(
         self,
@@ -39,6 +61,9 @@ class TrainLoop:
         schedule_sampler=None,
         weight_decay=0.0,
         lr_anneal_steps=0,
+        lr_warmup_steps=0,
+        use_bf16=False,
+        grad_clip=0.0,
         device_id=None,
         save_path
     ):
@@ -66,6 +91,15 @@ class TrainLoop:
         self.schedule_sampler = schedule_sampler or UniformSampler(diffusion)
         self.weight_decay = weight_decay
         self.lr_anneal_steps = lr_anneal_steps
+        self.lr_warmup_steps = lr_warmup_steps
+        self.grad_clip = grad_clip
+
+        if use_bf16 and use_fp16:
+            raise ValueError("use_bf16 and use_fp16 are mutually exclusive")
+        if use_bf16 and not th.cuda.is_available():
+            logger.log("bf16 requested but CUDA is unavailable; falling back to fp32")
+            use_bf16 = False
+        self.use_bf16 = use_bf16
 
         self.step = 0
         self.resume_step = resume_step
@@ -94,7 +128,21 @@ class TrainLoop:
             ]
         self.model.to(self.device)
         self.use_ddp = False
-        self.ddp_model = self.model
+        self.ddp_model = (
+            _AutocastModel(self.model, th.bfloat16) if self.use_bf16 else self.model
+        )
+
+        # adaLN gates are initialised to exactly zero, which makes every
+        # transformer block an identity at step 0. Tracking how far they move off
+        # zero is the only direct way to tell whether the blocks are being used
+        # at all, or whether the conv stack is doing all the work.
+        self._gate_params = [
+            p
+            for name, p in self.model.named_parameters()
+            if "ada.proj" in name and name.endswith(".weight")
+        ]
+        if self._gate_params:
+            logger.log(f"tracking {len(self._gate_params)} adaLN gate tensors")
 
     def _load_and_sync_parameters(self):
         resume_checkpoint = find_resume_checkpoint() or self.resume_checkpoint
@@ -147,6 +195,7 @@ class TrainLoop:
             self.run_step(img, bad_img, step_size)
 
             if self.step % self.log_interval == 0:
+                self._log_gate_scale()
                 logger.dumpkvs() 
 
             if self.step > 0 and self.step % self.save_interval == 0:
@@ -161,6 +210,16 @@ class TrainLoop:
     def run_step(self, img, bad_img,step_size):
 
         self.forward_backward(img, bad_img,step_size)
+
+        if self.grad_clip > 0:
+            if self.use_fp16:
+                # Gradients are still multiplied by the loss scale here, so a
+                # fixed threshold would be meaningless.
+                raise ValueError("grad_clip is not supported together with use_fp16")
+            total_norm = th.nn.utils.clip_grad_norm_(
+                self.model.parameters(), self.grad_clip
+            )
+            logger.logkv_mean("grad_norm_preclip", float(total_norm))
 
         took_step = self.mp_trainer.optimize(self.opt)
         if took_step:
@@ -196,6 +255,12 @@ class TrainLoop:
             loss = (losses["loss"] * weights).mean()
             self.loss_history.append(loss.item())
 
+            # Gradients accumulate across microbatches, so each one must carry
+            # its share of the batch rather than a full-weight gradient.
+            # Without this, running batch_size=16 with microbatch=2 silently
+            # multiplied the effective learning rate by 8.
+            accum_scale = img_tmp.shape[0] / img.shape[0]
+
             if self.loss_log_interval > 0 and step_size % self.loss_log_interval == 0:
                 # 将损失值和步长写入 CSV 文件
                 loss_csv_path = os.path.join(self.save_path, "loss_data.csv")
@@ -223,19 +288,44 @@ class TrainLoop:
             log_loss_dict(
                 self.diffusion, t, {k: v * weights for k, v in losses.items()}
             )
-            self.mp_trainer.backward(loss)
+            self.mp_trainer.backward(loss * accum_scale)
+
+    def _log_gate_scale(self):
+        """
+        Mean |weight| of the adaLN gate projections.
+
+        Starts at exactly 0. If it stays near 0 while the loss falls, the
+        transformer blocks are being bypassed and v2 has collapsed back onto the
+        v1 conv path -- which would make an inconclusive comparison look like an
+        architecture result.
+        """
+        if not self._gate_params:
+            return
+        with th.no_grad():
+            scale = sum(p.abs().mean().item() for p in self._gate_params)
+        logger.logkv("adaln_gate_scale", scale / len(self._gate_params))
 
     def _update_ema(self):
         for rate, params in zip(self.ema_rate, self.ema_params):
             update_ema(params, self.mp_trainer.master_params, rate=rate)
 
     def _anneal_lr(self):
-        if not self.lr_anneal_steps:
+        if not self.lr_anneal_steps and not self.lr_warmup_steps:
             return
-        frac_done = (self.step + self.resume_step) / self.lr_anneal_steps
-        lr = self.lr * (1 - frac_done)
+        step = self.step + self.resume_step
+        if self.lr_warmup_steps and step < self.lr_warmup_steps:
+            # Transformer blocks are far more sensitive to the first few hundred
+            # updates than the conv stack is; without warmup the attention logits
+            # can saturate before the gates have opened.
+            lr = self.lr * (step + 1) / self.lr_warmup_steps
+        elif self.lr_anneal_steps:
+            frac_done = step / self.lr_anneal_steps
+            lr = self.lr * (1 - frac_done)
+        else:
+            lr = self.lr
         for param_group in self.opt.param_groups:
             param_group["lr"] = lr
+        logger.logkv_mean("lr", lr)
 
     def log_step(self):
         logger.logkv("step", self.step + self.resume_step)

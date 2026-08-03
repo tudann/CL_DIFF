@@ -11,7 +11,6 @@ import torch.nn.functional as F
 from torch.nn import SiLU
 
 from . fp16_util import convert_module_to_f16, convert_module_to_f32
-from guided_diffusion.FFT_Transformer import FSAS, DFFN, TransformerBlock,LayerNorm
 from . nn import (
     checkpoint,
     conv_nd,

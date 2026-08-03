@@ -10,6 +10,7 @@ from guided_diffusion import logger #分布式训练相关工具；
 from guided_diffusion.image_datasets import  load_CL_IMG_data #加载训练数据；
 from guided_diffusion.resample import create_named_schedule_sampler #训练时用于 schedule sampling 的工具；
 from guided_diffusion.script_util import (args_to_dict, add_dict_to_argparser, CL_IMG_create_model_and_diffusion) #模型创建、默认参数等；
+from guided_diffusion.unet_v2 import load_v1_state_dict #从 v1 checkpoint 热启动；
 import torch as th
 from guided_diffusion.train_util import TrainLoop  #训练核心循环逻辑；
 
@@ -41,11 +42,29 @@ def main():
                             "resblock_updown", "use_fp16", "use_new_attention_order", "learn_sigma",
                             "diffusion_steps", "noise_schedule", "timestep_respacing", "use_kl",
                             "predict_xstart", "rescale_timesteps", "rescale_learned_sigmas",
-                            "condition_channels"
+                            "condition_channels",
+                            # v2 骨干相关
+                            "arch", "freq_resolutions", "transformer_depth", "freq_depth",
+                            "mlp_ratio", "freq_expansion", "freq_patch_size",
                         ]
         ),
         device=device,
     )
+
+    n_params = sum(p.numel() for p in model.parameters())
+    logger.log(f"arch={args.arch}, trainable parameters: {n_params / 1e6:.2f} M")
+
+    if args.init_from_v1:
+        if args.resume_checkpoint:
+            raise ValueError(
+                "--init_from_v1 and --resume_checkpoint are mutually exclusive"
+            )
+        if args.arch == "v1":
+            raise ValueError("--init_from_v1 is only meaningful for a v2 arch")
+        logger.log(f"warm starting from v1 checkpoint: {args.init_from_v1}")
+        load_v1_state_dict(
+            model, th.load(args.init_from_v1, map_location="cpu")
+        )
 
     if th.cuda.is_available():
         print("CUDA")
@@ -97,10 +116,13 @@ def main():
         resume_checkpoint=args.resume_checkpoint,
         resume_step = args.resume_step,
         use_fp16=args.use_fp16,
+        use_bf16=args.use_bf16,
         fp16_scale_growth=args.fp16_scale_growth,
         schedule_sampler=schedule_sampler,
         weight_decay=args.weight_decay,
         lr_anneal_steps=args.lr_anneal_steps,
+        lr_warmup_steps=args.lr_warmup_steps,
+        grad_clip=args.grad_clip,
 
         save_path=args.save_path,
     ).run_loop()
@@ -127,6 +149,10 @@ def create_argparser():
         shuffle=False,
 
         # ==== 模型结构相关 ====
+        # arch: v1  = 原始纯卷积 UNet（基线，可加载 v1 checkpoint）
+        #       v2a = UNet + 粗尺度稠密自注意力（DiT block）
+        #       v2b = v2a 再叠加中尺度频域注意力（FSAS/DFFN block）
+        arch="v2b",
         image_size=768,
         condition_channels=3,
         num_channels=64,
@@ -134,7 +160,15 @@ def create_argparser():
         num_heads=4,
         num_heads_upsample=-1,
         num_head_channels=-1,
-        attention_resolutions="16,8",
+        # 这两项按“特征图边长”解释：768 分辨率下各层依次为
+        # 768/384/192/96/48/24/12。稠密注意力放粗尺度，频域块放中尺度。
+        attention_resolutions="24,12",
+        freq_resolutions="96,48",
+        transformer_depth=1,
+        freq_depth=1,
+        mlp_ratio=4.0,
+        freq_expansion=2.66,
+        freq_patch_size=8,
         channel_mult="",
         dropout=0.0,
         use_checkpoint=False,
@@ -155,17 +189,31 @@ def create_argparser():
 
         # ==== 训练参数 ====
         lr=1e-4,
-        batch_size=2,
+        # batch_size 是优化器看到的等效批量，microbatch 是单次前向的实际批量，
+        # 两者配合即为梯度累积。batch_size=16/microbatch=2 的显存占用与
+        # batch_size=2 相同，但等效批量提升 8 倍。
+        batch_size=16,
+        microbatch=2,
         schedule_sampler="uniform",
         weight_decay=0.0,
-        lr_anneal_steps=300000,
-        microbatch=-1,
-        ema_rate="0,0.9999",
-        log_interval=1000,
-        save_interval=30000,
+        # 与 v1 的算力预算对齐：v1 是 300000 步 × 2 = 600000 次样本前向，
+        # 等效批量 16 下对应 37500 步。
+        lr_anneal_steps=37500,
+        lr_warmup_steps=2000,
+        grad_clip=1.0,
+        use_bf16=True,
+        # 0.9999 的平均窗口约 10000 步，在 37500 步的预算里会占到 27%，EMA 权重
+        # 会明显滞后。0.999 的窗口约 1000 步，与总步数的相对比例和 v1 一致。
+        ema_rate="0,0.999",
+        log_interval=200,
+        # 总步数缩短后必须同步调小，否则整个训练只会落下两个 checkpoint。
+        save_interval=2500,
         loss_log_interval=1,
         resume_checkpoint="",
         resume_step = 0,
+        # 从 v1 checkpoint 热启动 v2（与 resume_checkpoint 互斥）。
+        # adaLN 门控初值为 0，因此迁移过来的权重行为与 v1 完全一致。
+        init_from_v1="",
         fp16_scale_growth=1e-3,
     )
 

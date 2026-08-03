@@ -3,6 +3,10 @@ import argparse
 from guided_diffusion import gaussian_diffusion as gd
 from .respace import SpacedDiffusion, space_timesteps
 from .unet import CL_IMG_Model_test
+from .unet_v2 import CL_IMG_Transformer_UNet
+
+ARCH_CHOICES = ("v1", "v2a", "v2b")
+
 
 def CL_IMG_create_model_and_diffusion(
     image_size,
@@ -29,6 +33,13 @@ def CL_IMG_create_model_and_diffusion(
     use_new_attention_order,
     device,
     condition_channels=1,
+    arch="v2b",
+    freq_resolutions="96,48",
+    transformer_depth=1,
+    freq_depth=1,
+    mlp_ratio=4.0,
+    freq_expansion=2.66,
+    freq_patch_size=8,
 ):
     model = create_CL_IMG_model(
         image_size,
@@ -46,6 +57,13 @@ def CL_IMG_create_model_and_diffusion(
         resblock_updown=resblock_updown,
         use_fp16=use_fp16,
         use_new_attention_order=use_new_attention_order,
+        arch=arch,
+        freq_resolutions=freq_resolutions,
+        transformer_depth=transformer_depth,
+        freq_depth=freq_depth,
+        mlp_ratio=mlp_ratio,
+        freq_expansion=freq_expansion,
+        freq_patch_size=freq_patch_size,
     )
 
     diffusion = create_gaussian_diffusion(
@@ -69,7 +87,7 @@ def create_CL_IMG_model(
     condition_channels=1,
     channel_mult="",
     use_checkpoint=False,
-    attention_resolutions="16, 8",
+    attention_resolutions="24,12",
     num_heads=1,
     num_head_channels=-1,
     num_heads_upsample=-1,
@@ -78,8 +96,17 @@ def create_CL_IMG_model(
     resblock_updown=False,
     use_fp16=False,
     use_new_attention_order=False,
-   
+    arch="v2b",
+    freq_resolutions="96,48",
+    transformer_depth=1,
+    freq_depth=1,
+    mlp_ratio=4.0,
+    freq_expansion=2.66,
+    freq_patch_size=8,
 ):
+    if arch not in ARCH_CHOICES:
+        raise ValueError(f"unknown arch {arch!r}, expected one of {ARCH_CHOICES}")
+
 ###########  channel_mult模型每个 downsample 阶段的 channel 数 #########################################################################################
     if channel_mult == "":
         if image_size == 1024:
@@ -96,33 +123,66 @@ def create_CL_IMG_model(
         channel_mult = tuple(int(ch_mult) for ch_mult in channel_mult.split(","))
     print("channel_mult: ", channel_mult)
 
-############当特征图的分辨率是原图的 1/16 和 1/8 时，加入 attention 层#########################################################################
-    attention_ds = []
-    for res in attention_resolutions.split(","):
-        attention_ds.append(image_size // int(res))
+    if arch == "v1":
+        # Legacy path, kept bit-for-bit so existing v1 checkpoints still load and
+        # can serve as the baseline. Note that `image_size // res` is compared
+        # against a downsample factor that only takes powers of two, so for
+        # image_size=768 with "16,8" this resolves to {48, 96} and matches no
+        # level -- the v1 encoder and decoder have no attention at all.
+        attention_ds = [image_size // int(res) for res in attention_resolutions.split(",")]
+        print(f"[arch=v1] legacy attention downsample factors: {tuple(attention_ds)}")
+        return CL_IMG_Model_test(
+            image_size=image_size,
+            in_channels=1,
+            condition_channels=condition_channels,
+            out_channels=2,
+            model_channels=num_channels,
+            num_res_blocks=num_res_blocks,
+            attention_resolutions=tuple(attention_ds),
+            dropout=dropout,
+            channel_mult=channel_mult,
+            use_checkpoint=use_checkpoint,
+            use_fp16=use_fp16,
+            num_heads=num_heads,
+            num_head_channels=num_head_channels,
+            num_heads_upsample=num_heads_upsample,
+            use_scale_shift_norm=use_scale_shift_norm,
+            resblock_updown=resblock_updown,
+            use_new_attention_order=use_new_attention_order,
+        )
 
-    return CL_IMG_Model_test(
+    # v2a keeps dense attention only; v2b adds the frequency-domain blocks.
+    if arch == "v2a":
+        freq_resolutions = ""
+
+    print(
+        f"[arch={arch}] dense attention at feature maps: {attention_resolutions or 'none'}"
+        f" | frequency blocks at: {freq_resolutions or 'none'}"
+    )
+
+    return CL_IMG_Transformer_UNet(
         image_size=image_size,
         in_channels=1,
         condition_channels=condition_channels,
         out_channels=2,
-
         model_channels=num_channels,
         num_res_blocks=num_res_blocks,
-
-        attention_resolutions=tuple(attention_ds),
+        attention_resolutions=attention_resolutions,
+        freq_resolutions=freq_resolutions,
         dropout=dropout,
-
         channel_mult=channel_mult,
         use_checkpoint=use_checkpoint,
-
         use_fp16=use_fp16,
         num_heads=num_heads,
         num_head_channels=num_head_channels,
         num_heads_upsample=num_heads_upsample,
         use_scale_shift_norm=use_scale_shift_norm,
         resblock_updown=resblock_updown,
-        use_new_attention_order=use_new_attention_order,
+        transformer_depth=transformer_depth,
+        freq_depth=freq_depth,
+        mlp_ratio=mlp_ratio,
+        freq_expansion=freq_expansion,
+        freq_patch_size=freq_patch_size,
     )
 
 
