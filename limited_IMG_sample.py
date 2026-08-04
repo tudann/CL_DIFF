@@ -362,7 +362,8 @@ def main():
 def create_argparser():
     defaults = dict(
         gpu_id=0,
-        input_raw_dir="/home/lqg/code_8T/24/lt/data_make/17_360view/slice",
+        input_raw_dir="",
+        # input_raw_dir="/home/lqg/code_8T/24/lt/data_make/17_360view/slice",
         raw_height=1024,
         raw_width=1024,
         raw_dtype="float32",
