@@ -369,13 +369,20 @@ def create_argparser():
         raw_pattern="*.raw",
         raw_order="C",
         raw_volume_name="real_fdk",
-        input_npy="/home/lqg/code_8T/24/lt/data_make/CL-data_make/sim_pcb_test/cl_fdk_npy/test_phantom_0001_cl_fdk.npy",
-        label_npy="/home/lqg/code_8T/24/lt/data_make/CL-data_make/sim_pcb_test/ct_fdk_npy/test_phantom_0001_cl_fdk.npy",
-        data_dir1="/home/lqg/code_8T/24/lt/data_make/CL-data_make/ct_label_npy",
-        data_dir2="/home/lqg/code_8T/24/lt/data_make/CL-data_make/cl_label_npy",
+
+        # 同phantom路径
+        input_npy="/home/lqg/code_8T/24/lt/data_make/CL-data_make/output/evulate_data/pcb_phantom_npy/cl_fdk_npy/test_phantom_0001_cl_fdk.npy",
+        label_npy="/home/lqg/code_8T/24/lt/data_make/CL-data_make/output/evulate_data/pcb_phantom_npy/ct_fdk_npy/test_phantom_0001_cl_fdk.npy",
+        # data_dir1="/home/lqg/code_8T/24/lt/data_make/CL-data_make/ct_label_npy",
+        # data_dir2="/home/lqg/code_8T/24/lt/data_make/CL-data_make/cl_label_npy",
         batch_size=1,
-        model_path="/home/lqg/code_8T/24/lt/CL_DIFF_v1/checkpoints/first_test/ema_npy_0.9999_250000.pt",
-        output_dir="/home/lqg/code_8T/24/lt/CL_DIFF_v1/result/test_stub17_250000",
+
+        # [CT] label 模型训练路径
+        # model_path="/home/lqg/code_8T/24/lt/CL_DIFF_v1/checkpoints/first_test/ema_npy_0.9999_250000.pt",
+        # [Phantom+guss平滑] label 模型训练路径
+        model_path="/home/lqg/code_8T/24/lt/CL_DIFF_v1/CL_DIFF/checkpoints/phantom_label_guss/ema_npy_0.9999_300000.pt",
+
+        output_dir="/home/lqg/code_8T/24/lt/CL_DIFF_v1/result/label_guss/phantom_300000",
         max_samples=0,
         slover_data="no",
         image_size=768,
