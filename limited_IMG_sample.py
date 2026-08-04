@@ -362,8 +362,12 @@ def main():
 def create_argparser():
     defaults = dict(
         gpu_id=0,
-        input_raw_dir="",
+        # 测试其他数据需要为空
+        # input_raw_dir="",
+        # stub数据
         # input_raw_dir="/home/lqg/code_8T/24/lt/data_make/17_360view/slice",
+        # 蓝牙数据
+        input_raw_dir="/home/lqg/code_8T/24/lt/data_make/20_19_47/slice",
         raw_height=1024,
         raw_width=1024,
         raw_dtype="float32",
@@ -386,7 +390,7 @@ def create_argparser():
         # [Phantom+guss平滑] label 模型训练路径
         model_path="/home/lqg/code_8T/24/lt/CL_DIFF_v1/CL_DIFF/checkpoints/phantom_label_guss/ema_npy_0.9999_300000.pt",
 
-        output_dir="/home/lqg/code_8T/24/lt/CL_DIFF_v1/result/label_guss/mpcb_300000",
+        output_dir="/home/lqg/code_8T/24/lt/CL_DIFF_v1/result/label_guss/blue_300000",
         max_samples=0,
         slover_data="no",
         image_size=768,
