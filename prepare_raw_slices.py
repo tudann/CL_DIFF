@@ -34,6 +34,10 @@ OUTPUT_DTYPE = np.dtype("float32")
 # Prevent accidental overwriting of an earlier conversion.
 OVERWRITE = False
 
+# Validate only the first N naturally sorted files before resizing all files.
+# Set to 0 to validate the complete input directory.
+VALIDATE_LIMIT = 10
+
 
 def natural_sort_key(path):
     name = os.path.basename(path)
@@ -176,7 +180,14 @@ def main():
             f"No files found in {INPUT_DIR!r} matching {RAW_PATTERN!r}."
         )
 
-    records, errors = validate_files(input_paths)
+    validation_paths = (
+        input_paths[:VALIDATE_LIMIT] if VALIDATE_LIMIT > 0 else input_paths
+    )
+    print(
+        f"Validating {len(validation_paths)} of {len(input_paths)} files "
+        "before resizing."
+    )
+    records, errors = validate_files(validation_paths)
     report_path = write_validation_report(records)
     print(f"Validation report: {report_path}")
 
