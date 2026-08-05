@@ -6,6 +6,10 @@ os.environ['KMP_DUPLICATE_LIB_OK']='True'
 
 import argparse  #命令行参数解析；
 #from options import TrainOptions
+try:
+    import wandb
+except ImportError:
+    wandb = None
 from guided_diffusion import logger #分布式训练相关工具；
 from guided_diffusion.image_datasets import  load_CL_IMG_data #加载训练数据；
 from guided_diffusion.resample import create_named_schedule_sampler #训练时用于 schedule sampling 的工具；
@@ -26,6 +30,25 @@ def main():
         th.cuda.set_device(args.gpu_id)
     #dist_util.setup_dist()
     logger.configure(args.save_path)
+
+    wandb_run = None
+    if args.use_wandb:
+        if wandb is None:
+            raise RuntimeError(
+                "W&B is enabled but the wandb package is not installed. "
+                "Install it with: pip install wandb"
+            )
+        wandb_kwargs = {
+            "project": args.wandb_project,
+            "name": args.wandb_run_name or os.path.basename(args.save_path),
+            "config": vars(args),
+            "dir": args.wandb_dir or args.save_path,
+        }
+        if args.wandb_entity:
+            wandb_kwargs["entity"] = args.wandb_entity
+        if args.wandb_mode:
+            wandb_kwargs["mode"] = args.wandb_mode
+        wandb_run = wandb.init(**wandb_kwargs)
 
     logger.log("Creating CT_IMG model and diffusion...")
     #logger.log("在创建扩散模型设置方差为可学习")
@@ -86,32 +109,38 @@ def main():
     logger.log("training...")
 
     # TrainLoop才是主要修改的地方
-    TrainLoop(
-        model=model,
-        diffusion=diffusion,
-        data=data,
-        data_mode=args.data_mode,
-        batch_size=args.batch_size,
-        microbatch=args.microbatch,
-        lr=args.lr,
-        ema_rate=args.ema_rate,
-        device_id=device,
-        log_interval=args.log_interval,
-        save_interval=args.save_interval,
-        loss_log_interval=args.loss_log_interval,
+    try:
+        TrainLoop(
+            model=model,
+            diffusion=diffusion,
+            data=data,
+            data_mode=args.data_mode,
+            batch_size=args.batch_size,
+            microbatch=args.microbatch,
+            lr=args.lr,
+            ema_rate=args.ema_rate,
+            device_id=device,
+            log_interval=args.log_interval,
+            save_interval=args.save_interval,
+            loss_log_interval=args.loss_log_interval,
 
-        resume_checkpoint=args.resume_checkpoint,
-        resume_step = args.resume_step,
-        use_fp16=args.use_fp16,
-        fp16_scale_growth=args.fp16_scale_growth,
-        schedule_sampler=schedule_sampler,
-        weight_decay=args.weight_decay,
-        lr_anneal_steps=args.lr_anneal_steps,
-        boundary_loss_weight=args.boundary_loss_weight,
-        boundary_edge_weight=args.boundary_edge_weight,
+            resume_checkpoint=args.resume_checkpoint,
+            resume_step = args.resume_step,
+            use_fp16=args.use_fp16,
+            fp16_scale_growth=args.fp16_scale_growth,
+            schedule_sampler=schedule_sampler,
+            weight_decay=args.weight_decay,
+            lr_anneal_steps=args.lr_anneal_steps,
+            boundary_loss_weight=args.boundary_loss_weight,
+            boundary_edge_weight=args.boundary_edge_weight,
+            wandb_run=wandb_run,
+            wandb_log_interval=args.wandb_log_interval,
 
-        save_path=args.save_path,
-    ).run_loop()
+            save_path=args.save_path,
+        ).run_loop()
+    finally:
+        if wandb_run is not None:
+            wandb_run.finish()
 
 def create_argparser():
     defaults = dict(
@@ -180,6 +209,13 @@ def create_argparser():
         loss_log_interval=1,
         boundary_loss_weight=0.1,
         boundary_edge_weight=3.0,
+        use_wandb=True,
+        wandb_project="CL_DIFF",
+        wandb_entity="",
+        wandb_run_name="",
+        wandb_mode="",
+        wandb_dir="",
+        wandb_log_interval=100,
         resume_checkpoint="",
         resume_step = 0,
         fp16_scale_growth=1e-3,

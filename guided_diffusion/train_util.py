@@ -41,6 +41,8 @@ class TrainLoop:
         lr_anneal_steps=0,
         boundary_loss_weight=0.0,
         boundary_edge_weight=3.0,
+        wandb_run=None,
+        wandb_log_interval=100,
         device_id=None,
         save_path
     ):
@@ -70,6 +72,8 @@ class TrainLoop:
         self.lr_anneal_steps = lr_anneal_steps
         self.boundary_loss_weight = boundary_loss_weight
         self.boundary_edge_weight = boundary_edge_weight
+        self.wandb_run = wandb_run
+        self.wandb_log_interval = wandb_log_interval
 
         self.step = 0
         self.resume_step = resume_step
@@ -164,16 +168,31 @@ class TrainLoop:
 
     def run_step(self, img, bad_img,step_size):
 
-        self.forward_backward(img, bad_img,step_size)
+        metrics = self.forward_backward(img, bad_img, step_size)
 
         took_step = self.mp_trainer.optimize(self.opt)
         if took_step:
             self._update_ema()
         self._anneal_lr()
         self.log_step()
+        if (
+            self.wandb_run is not None
+            and self.wandb_log_interval > 0
+            and step_size % self.wandb_log_interval == 0
+        ):
+            metrics.update(
+                {
+                    "train/lr": self.opt.param_groups[0]["lr"],
+                    "train/step": step_size,
+                    "train/samples": (step_size + 1) * self.global_batch,
+                }
+            )
+            self.wandb_run.log(metrics, step=step_size)
 
     def forward_backward(self, img, bad_img, step_size):
         self.mp_trainer.zero_grad()  #清理上一次反向传播产生的梯度
+        metric_sums = {}
+        metric_count = 0
 
         for i in range(0, img.shape[0], self.microbatch):
             img_tmp = img[i: i + self.microbatch].to(self.device)
@@ -201,6 +220,11 @@ class TrainLoop:
 
             loss = (losses["loss"] * weights).mean()
             self.loss_history.append(loss.item())
+            metric_count += img_tmp.shape[0]
+            for key in ("loss", "mse", "vb", "boundary"):
+                if key in losses:
+                    value = (losses[key] * weights).detach().sum().item()
+                    metric_sums[key] = metric_sums.get(key, 0.0) + value
 
             if self.loss_log_interval > 0 and step_size % self.loss_log_interval == 0:
                 # 将损失值和步长写入 CSV 文件
@@ -230,6 +254,11 @@ class TrainLoop:
                 self.diffusion, t, {k: v * weights for k, v in losses.items()}
             )
             self.mp_trainer.backward(loss)
+
+        return {
+            f"train/{key}": value / max(metric_count, 1)
+            for key, value in metric_sums.items()
+        }
 
     def _update_ema(self):
         for rate, params in zip(self.ema_rate, self.ema_params):

@@ -14,6 +14,7 @@ __pycache__/
 result/
 loss_data.csv
 debug_data_preview/
+wandb/
 
 # Model checkpoints
 checkpoints/
