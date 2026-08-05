@@ -1,0 +1,17 @@
+"""Local W&B settings.
+
+Copy this file to wandb_config.py on the training server and fill in the API
+key. wandb_config.py is ignored by Git and must never be committed.
+"""
+
+USE_WANDB = True
+WANDB_API_KEY = ""
+WANDB_PROJECT = "CL_DIFF"
+WANDB_ENTITY = ""
+WANDB_RUN_NAME = ""
+
+# Use "online" for the W&B website or "offline" when the server has no
+# network access. An empty string lets W&B use its default behavior.
+WANDB_MODE = "online"
+WANDB_DIR = ""
+WANDB_LOG_INTERVAL = 100

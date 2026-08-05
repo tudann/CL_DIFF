@@ -10,6 +10,10 @@ try:
     import wandb
 except ImportError:
     wandb = None
+try:
+    import wandb_config as local_wandb_config
+except ImportError:
+    local_wandb_config = None
 from guided_diffusion import logger #分布式训练相关工具；
 from guided_diffusion.image_datasets import  load_CL_IMG_data #加载训练数据；
 from guided_diffusion.resample import create_named_schedule_sampler #训练时用于 schedule sampling 的工具；
@@ -21,6 +25,24 @@ from guided_diffusion.train_util import TrainLoop  #训练核心循环逻辑；
 def main():
 
     args = create_argparser().parse_args()
+    if local_wandb_config is not None:
+        args.use_wandb = getattr(local_wandb_config, "USE_WANDB", args.use_wandb)
+        args.wandb_project = getattr(
+            local_wandb_config, "WANDB_PROJECT", args.wandb_project
+        )
+        args.wandb_entity = getattr(
+            local_wandb_config, "WANDB_ENTITY", args.wandb_entity
+        )
+        args.wandb_run_name = getattr(
+            local_wandb_config, "WANDB_RUN_NAME", args.wandb_run_name
+        )
+        args.wandb_mode = getattr(
+            local_wandb_config, "WANDB_MODE", args.wandb_mode
+        )
+        args.wandb_dir = getattr(local_wandb_config, "WANDB_DIR", args.wandb_dir)
+        args.wandb_log_interval = getattr(
+            local_wandb_config, "WANDB_LOG_INTERVAL", args.wandb_log_interval
+        )
     if not os.path.isabs(args.save_path):
         args.save_path = os.path.abspath(args.save_path)
 
@@ -38,6 +60,11 @@ def main():
                 "W&B is enabled but the wandb package is not installed. "
                 "Install it with: pip install wandb"
             )
+        wandb_api_key = ""
+        if local_wandb_config is not None:
+            wandb_api_key = getattr(local_wandb_config, "WANDB_API_KEY", "")
+        if wandb_api_key:
+            wandb.login(key=wandb_api_key, relogin=False)
         wandb_kwargs = {
             "project": args.wandb_project,
             "name": args.wandb_run_name or os.path.basename(args.save_path),

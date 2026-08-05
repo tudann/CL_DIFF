@@ -15,6 +15,7 @@ result/
 loss_data.csv
 debug_data_preview/
 wandb/
+wandb_config.py
 
 # Model checkpoints
 checkpoints/
