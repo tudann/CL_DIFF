@@ -39,6 +39,8 @@ class TrainLoop:
         schedule_sampler=None,
         weight_decay=0.0,
         lr_anneal_steps=0,
+        boundary_loss_weight=0.0,
+        boundary_edge_weight=3.0,
         device_id=None,
         save_path
     ):
@@ -66,6 +68,8 @@ class TrainLoop:
         self.schedule_sampler = schedule_sampler or UniformSampler(diffusion)
         self.weight_decay = weight_decay
         self.lr_anneal_steps = lr_anneal_steps
+        self.boundary_loss_weight = boundary_loss_weight
+        self.boundary_edge_weight = boundary_edge_weight
 
         self.step = 0
         self.resume_step = resume_step
@@ -183,7 +187,9 @@ class TrainLoop:
                 bad_img_tmp,
                 t,
                 step_size,
-                device=self.device
+                device=self.device,
+                boundary_loss_weight=self.boundary_loss_weight,
+                boundary_edge_weight=self.boundary_edge_weight,
             )
 
             losses = compute_losses()

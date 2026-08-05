@@ -938,7 +938,19 @@ class GaussianDiffusion:
         output = th.where((t == 0), decoder_nll, kl)
         return {"output": output, "pred_xstart": out["pred_xstart"]}
 
-    def training_losses(self, model, x_start, limited_img, t, step_size, model_kwargs=None, noise=None, device=None):
+    def training_losses(
+        self,
+        model,
+        x_start,
+        limited_img,
+        t,
+        step_size,
+        model_kwargs=None,
+        noise=None,
+        device=None,
+        boundary_loss_weight=0.0,
+        boundary_edge_weight=3.0,
+    ):
         """
         Compute training losses for a single timestep.
 
@@ -1016,6 +1028,35 @@ class GaussianDiffusion:
             mse_1 = mean_flat((target - model_output) ** 2)
             terms["mse"] = mse_1
 
+            if boundary_loss_weight > 0:
+                # Phantom labels have reliable sharp boundaries. Supervising
+                # the reconstructed x0 near those boundaries helps the model
+                # recover edges that are weak in the CL condition.
+                pred_xstart = self._predict_xstart_from_eps(
+                    x_t=x_t,
+                    t=t,
+                    eps=model_output,
+                )
+                sobel_x = x_start.new_tensor(
+                    [[[-1.0, 0.0, 1.0], [-2.0, 0.0, 2.0], [-1.0, 0.0, 1.0]]]
+                ).unsqueeze(0)
+                sobel_y = x_start.new_tensor(
+                    [[[-1.0, -2.0, -1.0], [0.0, 0.0, 0.0], [1.0, 2.0, 1.0]]]
+                ).unsqueeze(0)
+                target_gx = F.conv2d(x_start, sobel_x, padding=1)
+                target_gy = F.conv2d(x_start, sobel_y, padding=1)
+                edge_strength = th.sqrt(
+                    target_gx.square() + target_gy.square() + 1e-6
+                )
+                edge_scale = edge_strength.mean(
+                    dim=(1, 2, 3), keepdim=True
+                ).clamp_min(1e-6)
+                edge_map = (edge_strength / edge_scale).clamp(0.0, 4.0)
+                edge_weight = 1.0 + boundary_edge_weight * edge_map
+                terms["boundary"] = mean_flat(
+                    edge_weight * (pred_xstart - x_start).abs()
+                )
+
             # ablation: freq loss disabled
             # freq_weight = getattr(self, "freq_loss_weight", 0.1)
             # terms["freq"] = missing_cone_loss(model_output, target,
@@ -1025,6 +1066,10 @@ class GaussianDiffusion:
                 terms["loss"] = terms["mse"] + terms["vb"]
             else:
                 terms["loss"] = terms["mse"]
+            if "boundary" in terms:
+                terms["loss"] = (
+                    terms["loss"] + boundary_loss_weight * terms["boundary"]
+                )
         else:
             raise NotImplementedError(self.loss_type)
 

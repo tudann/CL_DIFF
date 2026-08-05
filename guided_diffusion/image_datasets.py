@@ -5,6 +5,48 @@ import numpy as np
 from torch.utils.data import DataLoader, Dataset
 
 
+def augment_low_contrast_condition(
+    cond_stack,
+    probability=0.5,
+    contrast_min=0.3,
+    contrast_max=0.8,
+    noise_std=0.02,
+    blur_probability=0.25,
+):
+    """Make CL conditions look like low-contrast real measurements.
+
+    The same contrast factor is applied to all z-neighbor channels so the
+    2.5D geometry remains consistent. The phantom target is never modified.
+    """
+    if probability <= 0 or np.random.random() >= probability:
+        return cond_stack
+
+    stack = cond_stack.astype(np.float32, copy=True)
+    contrast = np.random.uniform(contrast_min, contrast_max)
+    mean_value = np.mean(stack, dtype=np.float32)
+    stack = mean_value + contrast * (stack - mean_value)
+
+    if blur_probability > 0 and np.random.random() < blur_probability:
+        # A small local average simulates the loss of weak edge contrast.
+        padded = np.pad(stack, ((0, 0), (1, 1), (1, 1)), mode="edge")
+        stack = (
+            padded[:, :-2, :-2]
+            + padded[:, 1:-1, :-2]
+            + padded[:, 2:, :-2]
+            + padded[:, :-2, 1:-1]
+            + padded[:, 1:-1, 1:-1]
+            + padded[:, 2:, 1:-1]
+            + padded[:, :-2, 2:]
+            + padded[:, 1:-1, 2:]
+            + padded[:, 2:, 2:]
+        ) / 9.0
+
+    if noise_std > 0:
+        stack += np.random.normal(0.0, noise_std, size=stack.shape).astype(np.float32)
+
+    return np.clip(stack, 0.0, 1.0)
+
+
 def _list_npy_files(data_dir):
     return sorted(glob.glob(os.path.join(data_dir, "*.npy")))
 
@@ -63,6 +105,12 @@ class CLVolumeSliceDataset(Dataset):
         crop_x=(127, 895),
         crop_y=(127, 895),
         use_mmap=True,
+        augment_condition=False,
+        condition_aug_probability=0.5,
+        condition_contrast_min=0.3,
+        condition_contrast_max=0.8,
+        condition_noise_std=0.02,
+        condition_blur_probability=0.25,
     ):
         if num_input_slices % 2 != 1:
             raise ValueError("num_input_slices must be odd, e.g. 3 for [z-1,z,z+1].")
@@ -74,6 +122,12 @@ class CLVolumeSliceDataset(Dataset):
         self.crop_x = crop_x
         self.crop_y = crop_y
         self.use_mmap = use_mmap
+        self.augment_condition = augment_condition
+        self.condition_aug_probability = condition_aug_probability
+        self.condition_contrast_min = condition_contrast_min
+        self.condition_contrast_max = condition_contrast_max
+        self.condition_noise_std = condition_noise_std
+        self.condition_blur_probability = condition_blur_probability
         self._volume_cache = {}
 
         crop_h = self.crop_x[1] - self.crop_x[0]
@@ -128,6 +182,15 @@ class CLVolumeSliceDataset(Dataset):
         label_slice = normalize_image(label_slice)[None, :, :].astype(np.float32)
         cond_stack = np.stack([normalize_image(slice_) for slice_ in cond_slices], axis=0)
         cond_stack = cond_stack.astype(np.float32)
+        if self.augment_condition:
+            cond_stack = augment_low_contrast_condition(
+                cond_stack,
+                probability=self.condition_aug_probability,
+                contrast_min=self.condition_contrast_min,
+                contrast_max=self.condition_contrast_max,
+                noise_std=self.condition_noise_std,
+                blur_probability=self.condition_blur_probability,
+            )
 
         stem = os.path.splitext(os.path.basename(cond_path))[0]
         sample_name = f"{stem}_z{z:03d}"
@@ -151,6 +214,12 @@ def load_CL_IMG_data(
         pin_memory=True,
         persistent_workers=True,
         shuffle=False,
+        augment_condition=None,
+        condition_aug_probability=0.5,
+        condition_contrast_min=0.3,
+        condition_contrast_max=0.8,
+        condition_noise_std=0.02,
+        condition_blur_probability=0.25,
 ):
     if not data_dir1:
         raise ValueError("data_dir1 is required")
@@ -166,6 +235,12 @@ def load_CL_IMG_data(
         crop_x=(crop_x_start, crop_x_end),
         crop_y=(crop_y_start, crop_y_end),
         use_mmap=use_mmap,
+        augment_condition=(mode == "train") if augment_condition is None else augment_condition,
+        condition_aug_probability=condition_aug_probability,
+        condition_contrast_min=condition_contrast_min,
+        condition_contrast_max=condition_contrast_max,
+        condition_noise_std=condition_noise_std,
+        condition_blur_probability=condition_blur_probability,
     )
 
     print("Dataset size:", len(dataset))

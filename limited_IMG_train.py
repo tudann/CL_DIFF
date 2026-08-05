@@ -75,6 +75,12 @@ def main():
         pin_memory=args.pin_memory,
         persistent_workers=args.persistent_workers,
         shuffle=args.shuffle,
+        augment_condition=args.augment_condition,
+        condition_aug_probability=args.condition_aug_probability,
+        condition_contrast_min=args.condition_contrast_min,
+        condition_contrast_max=args.condition_contrast_max,
+        condition_noise_std=args.condition_noise_std,
+        condition_blur_probability=args.condition_blur_probability,
     )
 
     logger.log("training...")
@@ -101,6 +107,8 @@ def main():
         schedule_sampler=schedule_sampler,
         weight_decay=args.weight_decay,
         lr_anneal_steps=args.lr_anneal_steps,
+        boundary_loss_weight=args.boundary_loss_weight,
+        boundary_edge_weight=args.boundary_edge_weight,
 
         save_path=args.save_path,
     ).run_loop()
@@ -109,11 +117,11 @@ def create_argparser():
     defaults = dict(
         # ==== 运行相关 ====
         gpu_id=0,
-        save_path="checkpoints/phantom_label_guss",
+        save_path="checkpoints/phantom_label_guss_lowcontrast_edge",
 
         # ==== 数据相关 ====
         data_mode='npy',
-        # data_dir1 is the CT-FDK label directory, data_dir2 is the CL-FDK input directory.
+        # data_dir1 is the phantom supervision label directory.
         data_dir1="/home/lqg/code_8T/24/lt/data_make/CL-data_make/output/train_data/phantom_guss",
         data_dir2="/home/lqg/code_8T/24/lt/data_make/CL-data_make/output/train_data/cl_label_npy",
         crop_x_start=127,
@@ -125,6 +133,12 @@ def create_argparser():
         pin_memory=True,
         persistent_workers=True,
         shuffle=False,
+        augment_condition=True,
+        condition_aug_probability=0.5,
+        condition_contrast_min=0.3,
+        condition_contrast_max=0.8,
+        condition_noise_std=0.02,
+        condition_blur_probability=0.25,
 
         # ==== 模型结构相关 ====
         image_size=768,
@@ -164,6 +178,8 @@ def create_argparser():
         log_interval=1000,
         save_interval=30000,
         loss_log_interval=1,
+        boundary_loss_weight=0.1,
+        boundary_edge_weight=3.0,
         resume_checkpoint="",
         resume_step = 0,
         fp16_scale_growth=1e-3,
