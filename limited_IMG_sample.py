@@ -367,7 +367,7 @@ def create_argparser():
         # stub数据
         # input_raw_dir="/home/lqg/code_8T/24/lt/data_make/17_360view/slice",
         # 蓝牙数据
-        # input_raw_dir="/home/lqg/code_8T/24/lt/data_make/20_19_47/1024",
+        input_raw_dir="/home/lqg/code_8T/24/lt/data_make/20_19_47/1024",
         raw_height=1024,
         raw_width=1024,
         raw_dtype="float32",
@@ -390,7 +390,7 @@ def create_argparser():
         # [Phantom+guss平滑] label 模型训练路径
         model_path="/home/lqg/code_8T/24/lt/CL_DIFF_v1/CL_DIFF/checkpoints/phantom_label_guss_lowcontrast_edge/ema_npy_0.9999_060000.pt",
 
-        output_dir="/home/lqg/code_8T/24/lt/CL_DIFF_v1/result/phantom_label_guss_lowcontrast_edge/mpcb_60000",
+        output_dir="/home/lqg/code_8T/24/lt/CL_DIFF_v1/result/phantom_label_guss_lowcontrast_edge/blue_60000",
         max_samples=0,
         slover_data="no",
         image_size=768,
