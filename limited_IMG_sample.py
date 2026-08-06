@@ -410,7 +410,7 @@ def create_argparser():
         # [Phantom+guss平滑] label 模型训练路径
         model_path="/home/lqg/code_8T/24/lt/CL_DIFF_v1/CL_DIFF/checkpoints/phantom_label_guss_lowcontrast_edge/ema_npy_0.9999_060000.pt",
 
-        output_dir="/home/lqg/code_8T/24/lt/CL_DIFF_v1/result/phantom_label_guss_lowcontrast_edge/stub_60000_2.5D_ddim25",
+        output_dir="/home/lqg/code_8T/24/lt/CL_DIFF_v1/result/phantom_label_guss_lowcontrast_edge/stub_60000_p25",
         max_samples=0,
         slover_data="no",
         image_size=768,
