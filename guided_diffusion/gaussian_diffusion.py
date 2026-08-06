@@ -384,9 +384,8 @@ class GaussianDiffusion:
             if clip_denoised:
                 # 归一化而不是裁剪
                 x_flat = x.view(x.size(0), -1)
-                min_vals, max_vals = th.aminmax(x_flat, dim=1, keepdim=True)
-                min_vals = min_vals.view(-1, 1, 1, 1)
-                max_vals = max_vals.view(-1, 1, 1, 1)
+                min_vals = x_flat.min(dim=1, keepdim=True)[0].view(-1, 1, 1, 1)
+                max_vals = x_flat.max(dim=1, keepdim=True)[0].view(-1, 1, 1, 1)
                 x = (x - min_vals) / (max_vals - min_vals + 1e-8)
             return x
 
@@ -814,6 +813,7 @@ class GaussianDiffusion:
                 * th.sqrt(1 - alpha_bar / alpha_bar_prev)
         )
         # Equation 12.
+        noise = th.randn_like(x)
         mean_pred = (
                 out["pred_xstart"] * th.sqrt(alpha_bar_prev)
                 + th.sqrt(1 - alpha_bar_prev - sigma ** 2) * eps
@@ -821,11 +821,7 @@ class GaussianDiffusion:
         nonzero_mask = (
             (t != 0).float().view(-1, *([1] * (len(x.shape) - 1)))
         )  # no noise when t == 0
-        if eta == 0.0:
-            sample = mean_pred
-        else:
-            noise = th.randn_like(x)
-            sample = mean_pred + nonzero_mask * sigma * noise
+        sample = mean_pred + nonzero_mask * sigma * noise
         return {"sample": sample, "pred_xstart": out["pred_xstart"]}
 
     def ddim_reverse_sample(
