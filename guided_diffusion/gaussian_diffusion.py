@@ -708,17 +708,18 @@ class GaussianDiffusion:
         out = None
         for i in indices:
             t = th.full((shape[0],), i, device=device, dtype=th.long)
-            out = self.ddim_sample(
-                model,
-                img,
-                t,
-                img_bz=img_bz,
-                clip_denoised=clip_denoised,
-                denoised_fn=denoised_fn,
-                model_kwargs=model_kwargs,
-                eta=eta,
-            )
-            img = out["sample"]
+            with th.no_grad():
+                out = self.ddim_sample(
+                    model,
+                    img,
+                    t,
+                    img_bz=img_bz,
+                    clip_denoised=clip_denoised,
+                    denoised_fn=denoised_fn,
+                    model_kwargs=model_kwargs,
+                    eta=eta,
+                )
+                img = out["sample"]
 
         return out["sample"]
 
