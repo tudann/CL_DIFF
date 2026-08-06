@@ -236,6 +236,19 @@ def save_comparison(path, cl_img, re_img, gt_img=None, metrics=None):
 
 def main():
     args = create_argparser().parse_args()
+    if args.sampler == "ddim":
+        # True conditional DDIM with the configured number of steps.
+        if args.ddim_steps <= 0:
+            raise ValueError("ddim_steps must be positive.")
+        args.timestep_respacing = f"ddim{args.ddim_steps}"
+    elif args.sampler == "p_sample":
+        # Original stochastic p_sample path with the configured number of steps.
+        if args.p_sample_steps <= 0:
+            raise ValueError("p_sample_steps must be positive.")
+        args.timestep_respacing = f"ddim{args.p_sample_steps}"
+    else:
+        raise ValueError("sampler must be 'ddim' or 'p_sample'.")
+
     device = th.device(f"cuda:{args.gpu_id}" if th.cuda.is_available() else "cpu")
     if th.cuda.is_available():
         th.cuda.set_device(args.gpu_id)
@@ -260,6 +273,7 @@ def main():
     if args.use_fp16:
         model.convert_to_fp16()
     model.eval()
+    print(f"Sampler: {args.sampler}, inference steps: {diffusion.num_timesteps}")
 
     if args.input_raw_dir:
         data = SingleCLRawSliceDataset(
@@ -300,7 +314,10 @@ def main():
             use_mmap=args.use_mmap,
         )
 
-    run_sampler = partial(diffusion.CL_IMG_ddim_sample_loop_test, eta=0.0)
+    if args.sampler == "ddim":
+        run_sampler = partial(diffusion.CL_IMG_ddim_sample_loop_test, eta=0.0)
+    else:
+        run_sampler = partial(diffusion.CL_IMG_sample_loop_test)
     re_dir = os.path.join(args.output_dir, "re")
     comp_dir = os.path.join(args.output_dir, "comparison")
     os.makedirs(re_dir, exist_ok=True)
@@ -384,6 +401,9 @@ def create_argparser():
         # data_dir1="/home/lqg/code_8T/24/lt/data_make/CL-data_make/ct_label_npy",
         # data_dir2="/home/lqg/code_8T/24/lt/data_make/CL-data_make/cl_label_npy",
         batch_size=1,
+        sampler="ddim",
+        ddim_steps=25,
+        p_sample_steps=50,
 
         # [CT] label 模型训练路径
         # model_path="/home/lqg/code_8T/24/lt/CL_DIFF_v1/checkpoints/first_test/ema_npy_0.9999_250000.pt",
@@ -411,7 +431,7 @@ def create_argparser():
         learn_sigma=True,
         diffusion_steps=1000,
         noise_schedule="linear",
-        timestep_respacing="ddim25",
+        timestep_respacing="",  # selected automatically from sampler and step count
         use_kl=False,
         predict_xstart=False,
         rescale_timesteps=False,
