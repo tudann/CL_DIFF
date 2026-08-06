@@ -64,7 +64,7 @@ def main():
         if local_wandb_config is not None:
             wandb_api_key = getattr(local_wandb_config, "WANDB_API_KEY", "")
         if wandb_api_key:
-            wandb.login(key=wandb_api_key, relogin=False)
+            os.environ["WANDB_API_KEY"] = wandb_api_key.strip()
         wandb_kwargs = {
             "project": args.wandb_project,
             "name": args.wandb_run_name or os.path.basename(args.save_path),
