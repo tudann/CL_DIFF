@@ -380,11 +380,11 @@ def create_argparser():
     defaults = dict(
         gpu_id=1,
         # 测试其他数据需要为空
-        input_raw_dir="",
+        # input_raw_dir="",
         # stub数据
         # input_raw_dir="/home/lqg/code_8T/24/lt/data_make/17_360view/slice",
         # 蓝牙数据
-        # input_raw_dir="/home/lqg/code_8T/24/lt/data_make/20_19_47/1024",
+        input_raw_dir="/home/lqg/code_8T/24/lt/data_make/20_19_47/1024",
         raw_height=1024,
         raw_width=1024,
         raw_dtype="float32",
@@ -408,9 +408,9 @@ def create_argparser():
         # [CT] label 模型训练路径
         # model_path="/home/lqg/code_8T/24/lt/CL_DIFF_v1/checkpoints/first_test/ema_npy_0.9999_250000.pt",
         # [Phantom+guss平滑] label 模型训练路径
-        model_path="/home/lqg/code_8T/24/lt/CL_DIFF_v1/CL_DIFF/checkpoints/phantom_label_guss_lowcontrast_edge/ema_npy_0.9999_060000.pt",
+        model_path="/home/lqg/code_8T/24/lt/CL_DIFF_v1/CL_DIFF/checkpoints/phantom_label_guss_lowcontrast_edge/ema_npy_0.9999_090000.pt",
 
-        output_dir="/home/lqg/code_8T/24/lt/CL_DIFF_v1/result/phantom_label_guss_lowcontrast_edge/stub_60000_p25",
+        output_dir="/home/lqg/code_8T/24/lt/CL_DIFF_v1/result/phantom_label_guss_lowcontrast_edge/blue20_90000_p25",
         max_samples=0,
         slover_data="no",
         image_size=768,
