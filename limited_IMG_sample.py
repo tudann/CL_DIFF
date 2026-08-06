@@ -363,7 +363,7 @@ def create_argparser():
     defaults = dict(
         gpu_id=1,
         # 测试其他数据需要为空
-        input_raw_dir="",
+        # input_raw_dir="",
         # stub数据
         # input_raw_dir="/home/lqg/code_8T/24/lt/data_make/17_360view/slice",
         # 蓝牙数据
