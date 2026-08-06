@@ -6,6 +6,7 @@ import csv
 import glob
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor
 
 import cv2
 import numpy as np
@@ -234,6 +235,26 @@ def save_comparison(path, cl_img, re_img, gt_img=None, metrics=None):
     cv2.imwrite(path, canvas)
 
 
+def save_slice_outputs(re_dir, comp_dir, img_name, z_idx, cl_img, result_img, gt_img=None):
+    """Save one slice and calculate its optional paired-image metrics."""
+    slice_name = f"{img_name}_z{z_idx:03d}"
+    re_path = os.path.join(re_dir, f"{slice_name}.png")
+    cv2.imwrite(re_path, (normalize_image(result_img) * 255).astype(np.uint8))
+
+    metrics = None
+    metrics_row = None
+    if gt_img is not None:
+        result_img_norm = normalize_image(result_img)
+        gt_img_norm = normalize_image(gt_img)
+        p, s, m = indicate(result_img_norm[None, ...], gt_img_norm[None, ...])
+        metrics = (float(p), float(s), float(m) * 1000)
+        metrics_row = [slice_name, metrics[0], metrics[1], metrics[2]]
+
+    comp_path = os.path.join(comp_dir, f"{slice_name}_comparison.png")
+    save_comparison(comp_path, cl_img, result_img, gt_img=gt_img, metrics=metrics)
+    return metrics_row
+
+
 def main():
     args = create_argparser().parse_args()
     if args.sampler == "ddim":
@@ -325,45 +346,50 @@ def main():
 
     metrics_list = []
     volume_slices = []
-    for sample_idx, data_batch in enumerate(data):
-        if args.max_samples > 0 and sample_idx >= args.max_samples:
-            break
+    output_futures = []
+    with ThreadPoolExecutor(max_workers=1) as output_executor, th.inference_mode():
+        for sample_idx, data_batch in enumerate(data):
+            if args.max_samples > 0 and sample_idx >= args.max_samples:
+                break
 
-        img, bad_img, sample_name = data_batch
-        if isinstance(sample_name, (list, tuple)):
-            sample_name = sample_name[0]
-        img_name = sample_name.rsplit("_z", 1)[0]
-        z_idx = int(sample_name.rsplit("_z", 1)[1])
+            img, bad_img, sample_name = data_batch
+            if isinstance(sample_name, (list, tuple)):
+                sample_name = sample_name[0]
+            img_name = sample_name.rsplit("_z", 1)[0]
+            z_idx = int(sample_name.rsplit("_z", 1)[1])
 
-        cond_img = bad_img.to(device, non_blocking=True)
-        center_channel = cond_img.shape[1] // 2
-        start_img = cond_img[:, center_channel:center_channel + 1]
-        cl_img = np.squeeze(start_img[0, 0].detach().cpu().numpy())
-        result_img = run_sampler(
-            model=model,
-            bad_img=start_img,
-            shape=start_img.shape,
-            slover_data=args.slover_data,
-            img_bz=cond_img,
-        )
-        result_img = np.squeeze(result_img[0, 0].cpu().numpy())
-        volume_slices.append(result_img.astype(np.float32))
+            cond_img = bad_img.to(device, non_blocking=True)
+            center_channel = cond_img.shape[1] // 2
+            start_img = cond_img[:, center_channel:center_channel + 1]
+            cl_img = np.squeeze(start_img[0, 0].detach().cpu().numpy()).copy()
+            result_img = run_sampler(
+                model=model,
+                bad_img=start_img,
+                shape=start_img.shape,
+                slover_data=args.slover_data,
+                img_bz=cond_img,
+            )
+            result_img = np.squeeze(result_img[0, 0].cpu().numpy()).copy()
+            volume_slices.append(result_img.astype(np.float32))
 
-        re_path = os.path.join(re_dir, f"{img_name}_z{z_idx:03d}.png")
-        cv2.imwrite(re_path, (normalize_image(result_img) * 255).astype(np.uint8))
+            gt_img = None
+            if img is not None:
+                gt_img = np.squeeze(img[0].numpy() if hasattr(img, "numpy") else img).copy()
 
-        gt_img = None
-        metrics = None
-        if img is not None:
-            gt_img = np.squeeze(img[0].numpy() if hasattr(img, "numpy") else img)
-            result_img_norm = normalize_image(result_img)
-            gt_img_norm = normalize_image(gt_img)
-            p, s, m = indicate(result_img_norm[None, ...], gt_img_norm[None, ...])
-            metrics = (float(p), float(s), float(m) * 1000)
-            metrics_list.append([f"{img_name}_z{z_idx:03d}", metrics[0], metrics[1], metrics[2]])
+            output_futures.append(
+                output_executor.submit(
+                    save_slice_outputs,
+                    re_dir,
+                    comp_dir,
+                    img_name,
+                    z_idx,
+                    cl_img,
+                    result_img,
+                    gt_img,
+                )
+            )
 
-        comp_path = os.path.join(comp_dir, f"{img_name}_z{z_idx:03d}_comparison.png")
-        save_comparison(comp_path, cl_img, result_img, gt_img=gt_img, metrics=metrics)
+    metrics_list = [row for future in output_futures if (row := future.result()) is not None]
 
     if volume_slices:
         volume = np.stack(volume_slices, axis=-1)
