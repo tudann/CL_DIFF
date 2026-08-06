@@ -6,6 +6,7 @@ import csv
 import glob
 import os
 import re
+import time
 
 import cv2
 import numpy as np
@@ -239,6 +240,14 @@ def main():
     device = th.device(f"cuda:{args.gpu_id}" if th.cuda.is_available() else "cpu")
     if th.cuda.is_available():
         th.cuda.set_device(args.gpu_id)
+        th.backends.cudnn.benchmark = args.cudnn_benchmark
+        th.backends.cudnn.allow_tf32 = args.allow_tf32
+        th.backends.cuda.matmul.allow_tf32 = args.allow_tf32
+        if args.allow_tf32:
+            th.set_float32_matmul_precision("high")
+    elif args.use_fp16:
+        print("FP16 inference requires CUDA; falling back to FP32 on CPU.")
+        args.use_fp16 = False
 
     model, diffusion = CL_IMG_create_model_and_diffusion(
         **args_to_dict(
@@ -255,11 +264,18 @@ def main():
         ),
         device=device,
     )
-    model.load_state_dict(th.load(args.model_path, map_location=device))
+    state_dict = th.load(args.model_path, map_location="cpu")
+    model.load_state_dict(state_dict)
+    del state_dict
     model.to(device)
     if args.use_fp16:
         model.convert_to_fp16()
     model.eval()
+    if args.use_torch_compile:
+        if not hasattr(th, "compile"):
+            raise RuntimeError("torch.compile requires PyTorch 2.0 or newer.")
+        print(f"Compiling model with mode={args.torch_compile_mode}...")
+        model = th.compile(model, mode=args.torch_compile_mode)
 
     if args.input_raw_dir:
         data = SingleCLRawSliceDataset(
@@ -300,7 +316,20 @@ def main():
             use_mmap=args.use_mmap,
         )
 
-    run_sampler = partial(diffusion.CL_IMG_sample_loop_test)
+    if args.sampler == "ddim":
+        run_sampler = partial(
+            diffusion.CL_IMG_ddim_sample_loop_test,
+            eta=args.ddim_eta,
+        )
+    elif args.sampler == "p_sample":
+        run_sampler = partial(diffusion.CL_IMG_sample_loop_test)
+    else:
+        raise ValueError("sampler must be 'ddim' or 'p_sample'.")
+
+    print(
+        f"Inference: sampler={args.sampler}, steps={diffusion.num_timesteps}, "
+        f"fp16={args.use_fp16}, compile={args.use_torch_compile}, device={device}"
+    )
     re_dir = os.path.join(args.output_dir, "re")
     comp_dir = os.path.join(args.output_dir, "comparison")
     os.makedirs(re_dir, exist_ok=True)
@@ -308,45 +337,62 @@ def main():
 
     metrics_list = []
     volume_slices = []
-    for sample_idx, data_batch in enumerate(data):
-        if args.max_samples > 0 and sample_idx >= args.max_samples:
-            break
+    processed_samples = 0
+    if device.type == "cuda":
+        th.cuda.synchronize(device)
+    inference_start = time.perf_counter()
 
-        img, bad_img, sample_name = data_batch
-        if isinstance(sample_name, (list, tuple)):
-            sample_name = sample_name[0]
-        img_name = sample_name.rsplit("_z", 1)[0]
-        z_idx = int(sample_name.rsplit("_z", 1)[1])
+    with th.inference_mode():
+        for sample_idx, data_batch in enumerate(data):
+            if args.max_samples > 0 and sample_idx >= args.max_samples:
+                break
 
-        cond_img = bad_img.to(device, non_blocking=True)
-        center_channel = cond_img.shape[1] // 2
-        start_img = cond_img[:, center_channel:center_channel + 1]
-        cl_img = np.squeeze(start_img[0, 0].detach().cpu().numpy())
-        result_img = run_sampler(
-            model=model,
-            bad_img=start_img,
-            shape=start_img.shape,
-            slover_data=args.slover_data,
-            img_bz=cond_img,
+            img, bad_img, sample_name = data_batch
+            if isinstance(sample_name, (list, tuple)):
+                sample_name = sample_name[0]
+            img_name = sample_name.rsplit("_z", 1)[0]
+            z_idx = int(sample_name.rsplit("_z", 1)[1])
+
+            cond_img = bad_img.to(device, non_blocking=True)
+            center_channel = cond_img.shape[1] // 2
+            start_img = cond_img[:, center_channel:center_channel + 1]
+            cl_img = np.squeeze(start_img[0, 0].detach().float().cpu().numpy())
+            result_img = run_sampler(
+                model=model,
+                bad_img=start_img,
+                shape=start_img.shape,
+                slover_data=args.slover_data,
+                img_bz=cond_img,
+                progress=args.show_progress,
+            )
+            result_img = np.squeeze(result_img[0, 0].float().cpu().numpy())
+            volume_slices.append(result_img.astype(np.float32))
+            processed_samples += 1
+
+            re_path = os.path.join(re_dir, f"{img_name}_z{z_idx:03d}.png")
+            cv2.imwrite(re_path, (normalize_image(result_img) * 255).astype(np.uint8))
+
+            gt_img = None
+            metrics = None
+            if img is not None:
+                gt_img = np.squeeze(img[0].numpy() if hasattr(img, "numpy") else img)
+                result_img_norm = normalize_image(result_img)
+                gt_img_norm = normalize_image(gt_img)
+                p, s, m = indicate(result_img_norm[None, ...], gt_img_norm[None, ...])
+                metrics = (float(p), float(s), float(m) * 1000)
+                metrics_list.append([f"{img_name}_z{z_idx:03d}", metrics[0], metrics[1], metrics[2]])
+
+            comp_path = os.path.join(comp_dir, f"{img_name}_z{z_idx:03d}_comparison.png")
+            save_comparison(comp_path, cl_img, result_img, gt_img=gt_img, metrics=metrics)
+
+    if device.type == "cuda":
+        th.cuda.synchronize(device)
+    elapsed = time.perf_counter() - inference_start
+    if processed_samples:
+        print(
+            f"Processed {processed_samples} slices in {elapsed:.2f}s "
+            f"({elapsed / processed_samples:.3f}s/slice)."
         )
-        result_img = np.squeeze(result_img[0, 0].cpu().numpy())
-        volume_slices.append(result_img.astype(np.float32))
-
-        re_path = os.path.join(re_dir, f"{img_name}_z{z_idx:03d}.png")
-        cv2.imwrite(re_path, (normalize_image(result_img) * 255).astype(np.uint8))
-
-        gt_img = None
-        metrics = None
-        if img is not None:
-            gt_img = np.squeeze(img[0].numpy() if hasattr(img, "numpy") else img)
-            result_img_norm = normalize_image(result_img)
-            gt_img_norm = normalize_image(gt_img)
-            p, s, m = indicate(result_img_norm[None, ...], gt_img_norm[None, ...])
-            metrics = (float(p), float(s), float(m) * 1000)
-            metrics_list.append([f"{img_name}_z{z_idx:03d}", metrics[0], metrics[1], metrics[2]])
-
-        comp_path = os.path.join(comp_dir, f"{img_name}_z{z_idx:03d}_comparison.png")
-        save_comparison(comp_path, cl_img, result_img, gt_img=gt_img, metrics=metrics)
 
     if volume_slices:
         volume = np.stack(volume_slices, axis=-1)
@@ -367,7 +413,7 @@ def create_argparser():
         # stub数据
         # input_raw_dir="/home/lqg/code_8T/24/lt/data_make/17_360view/slice",
         # 蓝牙数据
-        input_raw_dir="/home/lqg/code_8T/24/lt/data_make/20_19_47/1024",
+        # input_raw_dir="/home/lqg/code_8T/24/lt/data_make/20_19_47/1024",
         raw_height=1024,
         raw_width=1024,
         raw_dtype="float32",
@@ -390,9 +436,12 @@ def create_argparser():
         # [Phantom+guss平滑] label 模型训练路径
         model_path="/home/lqg/code_8T/24/lt/CL_DIFF_v1/CL_DIFF/checkpoints/phantom_label_guss_lowcontrast_edge/ema_npy_0.9999_060000.pt",
 
-        output_dir="/home/lqg/code_8T/24/lt/CL_DIFF_v1/result/phantom_label_guss_lowcontrast_edge/blue_60000",
+        output_dir="/home/lqg/code_8T/24/lt/CL_DIFF_v1/result/phantom_label_guss_lowcontrast_edge/stub_60000_2.5D_ddim25",
         max_samples=0,
         slover_data="no",
+        sampler="ddim",
+        ddim_eta=0.0,
+        show_progress=False,
         image_size=768,
         condition_channels=3,
         num_channels=64,
@@ -406,12 +455,16 @@ def create_argparser():
         use_checkpoint=False,
         use_scale_shift_norm=True,
         resblock_updown=False,
-        use_fp16=False,
+        use_fp16=True,
+        cudnn_benchmark=True,
+        allow_tf32=True,
+        use_torch_compile=False,
+        torch_compile_mode="reduce-overhead",
         use_new_attention_order=False,
         learn_sigma=True,
         diffusion_steps=1000,
         noise_schedule="linear",
-        timestep_respacing="ddim50",
+        timestep_respacing="ddim25",
         use_kl=False,
         predict_xstart=False,
         rescale_timesteps=False,

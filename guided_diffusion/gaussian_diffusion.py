@@ -384,8 +384,9 @@ class GaussianDiffusion:
             if clip_denoised:
                 # 归一化而不是裁剪
                 x_flat = x.view(x.size(0), -1)
-                min_vals = x_flat.min(dim=1, keepdim=True)[0].view(-1, 1, 1, 1)
-                max_vals = x_flat.max(dim=1, keepdim=True)[0].view(-1, 1, 1, 1)
+                min_vals, max_vals = th.aminmax(x_flat, dim=1, keepdim=True)
+                min_vals = min_vals.view(-1, 1, 1, 1)
+                max_vals = max_vals.view(-1, 1, 1, 1)
                 x = (x - min_vals) / (max_vals - min_vals + 1e-8)
             return x
 
@@ -679,6 +680,49 @@ class GaussianDiffusion:
 
         return out["sample"]
 
+    def CL_IMG_ddim_sample_loop_test(
+            self,
+            model,
+            bad_img,
+            shape,
+            slover_data,
+            img_bz,
+            clip_denoised=True,
+            denoised_fn=None,
+            model_kwargs=None,
+            device=None,
+            progress=True,
+            eta=0.0,
+    ):
+        """Sample a conditional CL volume slice with the DDIM update rule."""
+        if device is None:
+            device = next(model.parameters()).device
+        if slover_data != "no":
+            raise NotImplementedError("Conditional DDIM currently supports slover_data='no' only.")
+        assert isinstance(shape, (tuple, list, th.Size))
+
+        img = bad_img
+        indices = list(range(self.num_timesteps))[::-1]
+        if progress:
+            indices = tqdm(indices)
+
+        out = None
+        for i in indices:
+            t = th.full((shape[0],), i, device=device, dtype=th.long)
+            out = self.ddim_sample(
+                model,
+                img,
+                t,
+                img_bz=img_bz,
+                clip_denoised=clip_denoised,
+                denoised_fn=denoised_fn,
+                model_kwargs=model_kwargs,
+                eta=eta,
+            )
+            img = out["sample"]
+
+        return out["sample"]
+
     def p_sample_loop_progressive(
             self,
             model,
@@ -734,6 +778,7 @@ class GaussianDiffusion:
             model,
             x,
             t,
+            img_bz=None,
             clip_denoised=True,
             denoised_fn=None,
             cond_fn=None,
@@ -749,6 +794,7 @@ class GaussianDiffusion:
             model,
             x,
             t,
+            img_bz,
             clip_denoised=clip_denoised,
             denoised_fn=denoised_fn,
             model_kwargs=model_kwargs,
@@ -768,7 +814,6 @@ class GaussianDiffusion:
                 * th.sqrt(1 - alpha_bar / alpha_bar_prev)
         )
         # Equation 12.
-        noise = th.randn_like(x)
         mean_pred = (
                 out["pred_xstart"] * th.sqrt(alpha_bar_prev)
                 + th.sqrt(1 - alpha_bar_prev - sigma ** 2) * eps
@@ -776,7 +821,11 @@ class GaussianDiffusion:
         nonzero_mask = (
             (t != 0).float().view(-1, *([1] * (len(x.shape) - 1)))
         )  # no noise when t == 0
-        sample = mean_pred + nonzero_mask * sigma * noise
+        if eta == 0.0:
+            sample = mean_pred
+        else:
+            noise = th.randn_like(x)
+            sample = mean_pred + nonzero_mask * sigma * noise
         return {"sample": sample, "pred_xstart": out["pred_xstart"]}
 
     def ddim_reverse_sample(
