@@ -401,9 +401,9 @@ def create_argparser():
         # data_dir1="/home/lqg/code_8T/24/lt/data_make/CL-data_make/ct_label_npy",
         # data_dir2="/home/lqg/code_8T/24/lt/data_make/CL-data_make/cl_label_npy",
         batch_size=1,
-        sampler="ddim",
+        sampler="p_sample",  # ddim or p_sample
         ddim_steps=25,
-        p_sample_steps=50,
+        p_sample_steps=25,
 
         # [CT] label 模型训练路径
         # model_path="/home/lqg/code_8T/24/lt/CL_DIFF_v1/checkpoints/first_test/ema_npy_0.9999_250000.pt",
