@@ -173,7 +173,7 @@ def main():
 def create_argparser():
     defaults = dict(
         # ==== 运行相关 ====
-        gpu_id=0,
+        gpu_id=1,
         save_path="checkpoints/phantom_label_guss_lowcontrast_edge5.0_shareall",
 
         # ==== 数据相关 ====
