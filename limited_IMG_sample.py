@@ -186,6 +186,16 @@ def to_uint8(img):
     return (normalize_image(img) * 255).astype(np.uint8)
 
 
+def normalize_volume(volume):
+    """Normalize one complete H x W x Z volume with a shared value range."""
+    min_value = float(np.min(volume))
+    max_value = float(np.max(volume))
+    if max_value == min_value:
+        return np.zeros_like(volume, dtype=np.float32), min_value, max_value
+    normalized = (volume - min_value) / (max_value - min_value)
+    return normalized.astype(np.float32), min_value, max_value
+
+
 def draw_centered_text(canvas, text, x0, x1, y, font_scale=0.8, thickness=2):
     font = cv2.FONT_HERSHEY_SIMPLEX
     (text_w, text_h), _ = cv2.getTextSize(text, font, font_scale, thickness)
@@ -340,8 +350,10 @@ def main():
     else:
         run_sampler = partial(diffusion.CL_IMG_sample_loop_test)
     re_dir = os.path.join(args.output_dir, "re")
+    global_re_dir = os.path.join(args.output_dir, "re_global")
     comp_dir = os.path.join(args.output_dir, "comparison")
     os.makedirs(re_dir, exist_ok=True)
+    os.makedirs(global_re_dir, exist_ok=True)
     os.makedirs(comp_dir, exist_ok=True)
 
     metrics_list = []
@@ -393,7 +405,20 @@ def main():
 
     if volume_slices:
         volume = np.stack(volume_slices, axis=-1)
+        volume, volume_min, volume_max = normalize_volume(volume)
         np.save(os.path.join(args.output_dir, f"{img_name}_re.npy"), volume)
+        print(
+            f"Global volume normalization: min={volume_min:.6g}, "
+            f"max={volume_max:.6g}"
+        )
+
+        if args.save_global_png:
+            for z_idx in range(volume.shape[2]):
+                global_slice = (np.clip(volume[:, :, z_idx], 0.0, 1.0) * 255).astype(np.uint8)
+                cv2.imwrite(
+                    os.path.join(global_re_dir, f"{img_name}_z{z_idx:03d}.png"),
+                    global_slice,
+                )
 
     if metrics_list:
         with open(os.path.join(args.output_dir, "image_metrics.csv"), mode="w", newline="") as file:
@@ -430,6 +455,7 @@ def create_argparser():
         sampler="p_sample",  # ddim or p_sample
         ddim_steps=25,
         p_sample_steps=25,
+        save_global_png=True,
 
         # [CT] label 模型训练路径
         # model_path="/home/lqg/code_8T/24/lt/CL_DIFF_v1/checkpoints/first_test/ema_npy_0.9999_250000.pt",
