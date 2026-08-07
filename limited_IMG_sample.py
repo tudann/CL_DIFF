@@ -15,7 +15,11 @@ from functools import partial
 from skimage.metrics import peak_signal_noise_ratio as psnr, structural_similarity as ssim, mean_squared_error as mse
 
 from guided_diffusion import logger
-from guided_diffusion.image_datasets import load_CL_IMG_data, normalize_image
+from guided_diffusion.image_datasets import (
+    load_CL_IMG_data,
+    normalize_image,
+    volume_value_range,
+)
 from guided_diffusion.script_util import add_dict_to_argparser, args_to_dict, CL_IMG_create_model_and_diffusion
 
 
@@ -29,6 +33,7 @@ class SingleCLVolumeDataset:
         crop_x=(127, 895),
         crop_y=(127, 895),
         use_mmap=True,
+        normalization_mode="volume",
     ):
         if num_input_slices % 2 != 1:
             raise ValueError("num_input_slices must be odd, e.g. 3 for [z-1,z,z+1].")
@@ -42,6 +47,9 @@ class SingleCLVolumeDataset:
         self.num_input_slices = num_input_slices
         self.crop_x = crop_x
         self.crop_y = crop_y
+        if normalization_mode not in ("slice", "volume"):
+            raise ValueError("normalization_mode must be 'slice' or 'volume'.")
+        self.normalization_mode = normalization_mode
         self.stem = os.path.splitext(os.path.basename(input_npy))[0]
 
         if self.input_volume.ndim != 3:
@@ -56,6 +64,17 @@ class SingleCLVolumeDataset:
         crop_w = crop_y[1] - crop_y[0]
         if crop_h != image_size or crop_w != image_size:
             raise ValueError(f"Crop size ({crop_h}, {crop_w}) does not match image_size={image_size}.")
+
+        self.input_range = None
+        self.label_range = None
+        if self.normalization_mode == "volume":
+            self.input_range = volume_value_range(
+                self.input_volume, self.crop_x, self.crop_y
+            )
+            if self.label_volume is not None:
+                self.label_range = volume_value_range(
+                    self.label_volume, self.crop_x, self.crop_y
+                )
 
     def __len__(self):
         return self.input_volume.shape[2]
@@ -75,14 +94,19 @@ class SingleCLVolumeDataset:
             np.asarray(self.input_volume[x0:x1, y0:y1, zi], dtype=np.float32)
             for zi in z_indices
         ]
-        cond_stack = np.stack([normalize_image(slice_) for slice_ in cond_slices], axis=0)
+        cond_stack = np.stack(
+            [normalize_image(slice_, self.input_range) for slice_ in cond_slices],
+            axis=0,
+        )
         cond_stack = th.from_numpy(cond_stack[None, ...].astype(np.float32))
 
         if self.label_volume is None:
             label_slice = None
         else:
             label_slice = np.asarray(self.label_volume[x0:x1, y0:y1, z], dtype=np.float32)
-            label_slice = normalize_image(label_slice)[None, :, :].astype(np.float32)
+            label_slice = normalize_image(
+                label_slice, self.label_range
+            )[None, :, :].astype(np.float32)
 
         return label_slice, cond_stack, f"{self.stem}_z{z:03d}"
 
@@ -106,6 +130,7 @@ class SingleCLRawSliceDataset:
         raw_pattern="*.raw",
         raw_order="C",
         volume_name="",
+        normalization_mode="volume",
     ):
         if num_input_slices % 2 != 1:
             raise ValueError("num_input_slices must be odd, e.g. 3 for [z-1,z,z+1].")
@@ -123,6 +148,9 @@ class SingleCLRawSliceDataset:
         self.raw_width = raw_width
         self.raw_dtype = np.dtype(raw_dtype)
         self.raw_order = raw_order
+        if normalization_mode not in ("slice", "volume"):
+            raise ValueError("normalization_mode must be 'slice' or 'volume'.")
+        self.normalization_mode = normalization_mode
         self.expected_values = raw_height * raw_width
         self.stem = volume_name or os.path.basename(os.path.abspath(input_raw_dir))
 
@@ -130,6 +158,10 @@ class SingleCLRawSliceDataset:
         crop_w = crop_y[1] - crop_y[0]
         if crop_h != image_size or crop_w != image_size:
             raise ValueError(f"Crop size ({crop_h}, {crop_w}) does not match image_size={image_size}.")
+
+        self.input_range = None
+        if self.normalization_mode == "volume":
+            self.input_range = self._compute_volume_range()
 
     def __len__(self):
         return len(self.raw_files)
@@ -148,6 +180,17 @@ class SingleCLRawSliceDataset:
             )
         return data.reshape((self.raw_height, self.raw_width), order=self.raw_order)
 
+    def _compute_volume_range(self):
+        x0, x1 = self.crop_x
+        y0, y1 = self.crop_y
+        min_value = float("inf")
+        max_value = float("-inf")
+        for z in range(len(self)):
+            cropped = self._read_raw_slice(z)[x0:x1, y0:y1]
+            min_value = min(min_value, float(np.min(cropped)))
+            max_value = max(max_value, float(np.max(cropped)))
+        return min_value, max_value
+
     def __getitem__(self, z):
         z_count = len(self)
         half = self.num_input_slices // 2
@@ -159,7 +202,10 @@ class SingleCLRawSliceDataset:
             np.asarray(self._read_raw_slice(zi)[x0:x1, y0:y1], dtype=np.float32)
             for zi in z_indices
         ]
-        cond_stack = np.stack([normalize_image(slice_) for slice_ in cond_slices], axis=0)
+        cond_stack = np.stack(
+            [normalize_image(slice_, self.input_range) for slice_ in cond_slices],
+            axis=0,
+        )
         cond_stack = th.from_numpy(cond_stack[None, ...].astype(np.float32))
         return None, cond_stack, f"{self.stem}_z{z:03d}"
 
@@ -171,19 +217,19 @@ def indicate(img1, img2):
         ssim0 = np.zeros(batch)
         mse0 = np.zeros(batch)
         for i in range(batch):
-            t1 = img1[i, ...] / np.max(img1[i, ...])
-            t2 = img2[i, ...] / np.max(img2[i, ...])
+            t1 = np.clip(img1[i, ...], 0.0, 1.0)
+            t2 = np.clip(img2[i, ...], 0.0, 1.0)
             psnr0[i] = psnr(t1, t2, data_range=1)
             ssim0[i] = ssim(t1, t2, data_range=1)
             mse0[i] = mse(t1, t2)
         return psnr0, ssim0, mse0
-    img1 /= img1.max()
-    img2 /= img2.max()
+    img1 = np.clip(img1, 0.0, 1.0)
+    img2 = np.clip(img2, 0.0, 1.0)
     return psnr(img1, img2, data_range=1), ssim(img1, img2, data_range=1), mse(img1, img2)
 
 
 def to_uint8(img):
-    return (normalize_image(img) * 255).astype(np.uint8)
+    return (np.clip(img, 0.0, 1.0) * 255).astype(np.uint8)
 
 
 def normalize_volume(volume):
@@ -249,13 +295,13 @@ def save_slice_outputs(re_dir, comp_dir, img_name, z_idx, cl_img, result_img, gt
     """Save one slice and calculate its optional paired-image metrics."""
     slice_name = f"{img_name}_z{z_idx:03d}"
     re_path = os.path.join(re_dir, f"{slice_name}.png")
-    cv2.imwrite(re_path, (normalize_image(result_img) * 255).astype(np.uint8))
+    cv2.imwrite(re_path, to_uint8(result_img))
 
     metrics = None
     metrics_row = None
     if gt_img is not None:
-        result_img_norm = normalize_image(result_img)
-        gt_img_norm = normalize_image(gt_img)
+        result_img_norm = np.clip(result_img, 0.0, 1.0)
+        gt_img_norm = np.clip(gt_img, 0.0, 1.0)
         p, s, m = indicate(result_img_norm[None, ...], gt_img_norm[None, ...])
         metrics = (float(p), float(s), float(m) * 1000)
         metrics_row = [slice_name, metrics[0], metrics[1], metrics[2]]
@@ -319,6 +365,7 @@ def main():
             raw_pattern=args.raw_pattern,
             raw_order=args.raw_order,
             volume_name=args.raw_volume_name,
+            normalization_mode=args.normalization_mode,
         )
     elif args.input_npy:
         data = SingleCLVolumeDataset(
@@ -329,6 +376,7 @@ def main():
             crop_x=(args.crop_x_start, args.crop_x_end),
             crop_y=(args.crop_y_start, args.crop_y_end),
             use_mmap=args.use_mmap,
+            normalization_mode=args.normalization_mode,
         )
     else:
         data = load_CL_IMG_data(
@@ -343,6 +391,7 @@ def main():
             crop_y_start=args.crop_y_start,
             crop_y_end=args.crop_y_end,
             use_mmap=args.use_mmap,
+            normalization_mode=args.normalization_mode,
         )
 
     if args.sampler == "ddim":
@@ -405,11 +454,16 @@ def main():
 
     if volume_slices:
         volume = np.stack(volume_slices, axis=-1)
-        volume, volume_min, volume_max = normalize_volume(volume)
+        volume_min = float(np.min(volume))
+        volume_max = float(np.max(volume))
+        if args.normalize_output_volume:
+            volume, _, _ = normalize_volume(volume)
+        else:
+            volume = np.clip(volume, 0.0, 1.0).astype(np.float32)
         np.save(os.path.join(args.output_dir, f"{img_name}_re.npy"), volume)
         print(
-            f"Global volume normalization: min={volume_min:.6g}, "
-            f"max={volume_max:.6g}"
+            f"Output volume before saving: min={volume_min:.6g}, "
+            f"max={volume_max:.6g}, normalized={args.normalize_output_volume}"
         )
 
         if args.save_global_png:
@@ -458,6 +512,7 @@ def create_argparser():
         ddim_steps=25,
         p_sample_steps=25,
         save_global_png=True,
+        normalize_output_volume=False,
 
         # [CT] label 模型训练路径
         # model_path="/home/lqg/code_8T/24/lt/CL_DIFF_v1/checkpoints/first_test/ema_npy_0.9999_250000.pt",
@@ -495,6 +550,7 @@ def create_argparser():
         crop_y_start=127,
         crop_y_end=895,
         use_mmap=True,
+        normalization_mode="volume",
     )
     parser = argparse.ArgumentParser()
     add_dict_to_argparser(parser, defaults)

@@ -72,6 +72,7 @@ def main():
         crop_x=(args.crop_x_start, args.crop_x_end),
         crop_y=(args.crop_y_start, args.crop_y_end),
         use_mmap=True,
+        normalization_mode=args.normalization_mode,
     )
     print(f"\nTotal slice samples: {len(dataset)}")
     print(
@@ -103,6 +104,7 @@ def create_argparser():
         crop_x_end=895,
         crop_y_start=127,
         crop_y_end=895,
+        normalization_mode="volume",
         preview_pairs=3,
         save_preview=True,
         preview_output_dir="debug_data_preview",

@@ -77,17 +77,30 @@ def _pair_npy_files(label_dir, cond_dir):
     return pairs
 
 
-def normalize_image(img):
+def normalize_image(img, value_range=None):
     if not isinstance(img, np.ndarray):
         raise ValueError("Input image must be a NumPy array")
     if img.ndim != 2:
         raise ValueError("Input image must be a 2D array")
 
-    min_val = np.min(img)
-    max_val = np.max(img)
+    if value_range is None:
+        min_val = float(np.min(img))
+        max_val = float(np.max(img))
+    else:
+        min_val, max_val = value_range
     if max_val == min_val:
-        return np.zeros_like(img)
-    return (img - min_val) / (max_val - min_val)
+        return np.zeros_like(img, dtype=np.float32)
+    return np.clip((img - min_val) / (max_val - min_val), 0.0, 1.0)
+
+
+def volume_value_range(volume, crop_x=None, crop_y=None):
+    """Return one shared value range for every z-slice in a volume."""
+    if volume.ndim != 3:
+        raise ValueError("Input volume must be a 3D array")
+    x0, x1 = crop_x or (0, volume.shape[0])
+    y0, y1 = crop_y or (0, volume.shape[1])
+    cropped = volume[x0:x1, y0:y1, :]
+    return float(np.min(cropped)), float(np.max(cropped))
 
 
 class CLVolumeSliceDataset(Dataset):
@@ -105,6 +118,7 @@ class CLVolumeSliceDataset(Dataset):
         crop_x=(127, 895),
         crop_y=(127, 895),
         use_mmap=True,
+        normalization_mode="volume",
         augment_condition=False,
         condition_aug_probability=0.5,
         condition_contrast_min=0.3,
@@ -122,6 +136,9 @@ class CLVolumeSliceDataset(Dataset):
         self.crop_x = crop_x
         self.crop_y = crop_y
         self.use_mmap = use_mmap
+        if normalization_mode not in ("slice", "volume"):
+            raise ValueError("normalization_mode must be 'slice' or 'volume'.")
+        self.normalization_mode = normalization_mode
         self.augment_condition = augment_condition
         self.condition_aug_probability = condition_aug_probability
         self.condition_contrast_min = condition_contrast_min
@@ -129,6 +146,7 @@ class CLVolumeSliceDataset(Dataset):
         self.condition_noise_std = condition_noise_std
         self.condition_blur_probability = condition_blur_probability
         self._volume_cache = {}
+        self._normalization_ranges = {}
 
         crop_h = self.crop_x[1] - self.crop_x[0]
         crop_w = self.crop_y[1] - self.crop_y[0]
@@ -139,10 +157,23 @@ class CLVolumeSliceDataset(Dataset):
 
         self.indices = []
         for pair_idx, label_path in enumerate(self.label_paths):
-            volume = self._load_volume(label_path)
-            if volume.ndim != 3:
+            label_volume = self._load_volume(label_path)
+            cond_volume = self._load_volume(self.cond_paths[pair_idx])
+            if label_volume.ndim != 3:
                 raise ValueError(f"Expected 3D volume layout (x, y, z): {label_path}")
-            for z in range(volume.shape[2]):
+            if label_volume.shape != cond_volume.shape:
+                raise ValueError(
+                    f"CT/CL volume shape mismatch: {label_path} {label_volume.shape} vs "
+                    f"{self.cond_paths[pair_idx]} {cond_volume.shape}"
+                )
+            if self.normalization_mode == "volume":
+                self._normalization_ranges[label_path] = volume_value_range(
+                    label_volume, self.crop_x, self.crop_y
+                )
+                self._normalization_ranges[self.cond_paths[pair_idx]] = volume_value_range(
+                    cond_volume, self.crop_x, self.crop_y
+                )
+            for z in range(label_volume.shape[2]):
                 self.indices.append((pair_idx, z))
 
     def _load_volume(self, path):
@@ -179,8 +210,12 @@ class CLVolumeSliceDataset(Dataset):
             for zi in z_indices
         ]
 
-        label_slice = normalize_image(label_slice)[None, :, :].astype(np.float32)
-        cond_stack = np.stack([normalize_image(slice_) for slice_ in cond_slices], axis=0)
+        label_range = self._normalization_ranges.get(label_path)
+        cond_range = self._normalization_ranges.get(cond_path)
+        label_slice = normalize_image(label_slice, label_range)[None, :, :].astype(np.float32)
+        cond_stack = np.stack(
+            [normalize_image(slice_, cond_range) for slice_ in cond_slices], axis=0
+        )
         cond_stack = cond_stack.astype(np.float32)
         if self.augment_condition:
             cond_stack = augment_low_contrast_condition(
@@ -210,6 +245,7 @@ def load_CL_IMG_data(
         crop_y_start=127,
         crop_y_end=895,
         use_mmap=True,
+        normalization_mode="volume",
         num_workers=4,
         pin_memory=True,
         persistent_workers=True,
@@ -235,6 +271,7 @@ def load_CL_IMG_data(
         crop_x=(crop_x_start, crop_x_end),
         crop_y=(crop_y_start, crop_y_end),
         use_mmap=use_mmap,
+        normalization_mode=normalization_mode,
         augment_condition=(mode == "train") if augment_condition is None else augment_condition,
         condition_aug_probability=condition_aug_probability,
         condition_contrast_min=condition_contrast_min,

@@ -121,6 +121,7 @@ def main():
         crop_y_start=args.crop_y_start,
         crop_y_end=args.crop_y_end,
         use_mmap=args.use_mmap,
+        normalization_mode=args.normalization_mode,
         num_workers=args.num_workers,
         pin_memory=args.pin_memory,
         persistent_workers=args.persistent_workers,
@@ -173,7 +174,7 @@ def create_argparser():
     defaults = dict(
         # ==== 运行相关 ====
         gpu_id=0,
-        save_path="checkpoints/phantom_label_guss_lowcontrast_edge5.0",
+        save_path="checkpoints/phantom_label_guss_lowcontrast_edge5.0_shareall",
 
         # ==== 数据相关 ====
         data_mode='npy',
@@ -185,6 +186,7 @@ def create_argparser():
         crop_y_start=127,
         crop_y_end=895,
         use_mmap=True,
+        normalization_mode="volume",
         num_workers=4,
         pin_memory=True,
         persistent_workers=True,

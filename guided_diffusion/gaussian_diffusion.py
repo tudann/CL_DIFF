@@ -382,11 +382,7 @@ class GaussianDiffusion:
             if denoised_fn is not None:
                 x = denoised_fn(x)
             if clip_denoised:
-                # 归一化而不是裁剪
-                x_flat = x.view(x.size(0), -1)
-                min_vals = x_flat.min(dim=1, keepdim=True)[0].view(-1, 1, 1, 1)
-                max_vals = x_flat.max(dim=1, keepdim=True)[0].view(-1, 1, 1, 1)
-                x = (x - min_vals) / (max_vals - min_vals + 1e-8)
+                x = x.clamp(0.0, 1.0)
             return x
 
 
