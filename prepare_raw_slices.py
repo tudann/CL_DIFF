@@ -31,7 +31,7 @@ OUTPUT_HEIGHT = 1024
 OUTPUT_WIDTH = 1024
 OUTPUT_DTYPE = np.dtype("float32")
 
-# Prevent accidental overwriting of an earlier conversion.
+# False skips complete existing outputs; True replaces them.
 OVERWRITE = False
 
 # Validate only the first N naturally sorted files before resizing all files.
@@ -137,14 +137,30 @@ def write_validation_report(records):
 def resize_files(paths):
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     output_paths = []
+    skipped_paths = []
+    expected_output_bytes = expected_bytes(
+        OUTPUT_HEIGHT,
+        OUTPUT_WIDTH,
+        OUTPUT_DTYPE,
+    )
 
     for index, input_path in enumerate(paths):
         output_path = os.path.join(OUTPUT_DIR, os.path.basename(input_path))
         if os.path.exists(output_path) and not OVERWRITE:
-            raise FileExistsError(
-                f"Output already exists: {output_path}. "
-                "Set OVERWRITE=True only when replacement is intended."
-            )
+            output_bytes = os.path.getsize(output_path)
+            if output_bytes != expected_output_bytes:
+                raise FileExistsError(
+                    f"Existing output has an unexpected size: {output_path} "
+                    f"({output_bytes} bytes, expected {expected_output_bytes}). "
+                    "Remove the incomplete file or set OVERWRITE=True."
+                )
+            skipped_paths.append(output_path)
+            if (index + 1) % 10 == 0 or index + 1 == len(paths):
+                print(
+                    f"Processed {index + 1}/{len(paths)} files "
+                    f"(resized={len(output_paths)}, skipped={len(skipped_paths)})."
+                )
+            continue
 
         source = np.fromfile(input_path, dtype=RAW_DTYPE)
         source = source.reshape((RAW_HEIGHT, RAW_WIDTH), order=RAW_ORDER)
@@ -165,9 +181,12 @@ def resize_files(paths):
         output_paths.append(output_path)
 
         if (index + 1) % 10 == 0 or index + 1 == len(paths):
-            print(f"Resized {index + 1}/{len(paths)} files.")
+            print(
+                f"Processed {index + 1}/{len(paths)} files "
+                f"(resized={len(output_paths)}, skipped={len(skipped_paths)})."
+            )
 
-    return output_paths
+    return output_paths, skipped_paths
 
 
 def main():
@@ -197,8 +216,10 @@ def main():
             print(f"  {record['input_file']}: {record['error']}")
         raise RuntimeError("Fix RAW validation errors before resizing.")
 
-    output_paths = resize_files(input_paths)
-    print(f"Resize complete: {len(output_paths)} files")
+    output_paths, skipped_paths = resize_files(input_paths)
+    print(f"Resize complete: {len(output_paths)} new file(s)")
+    print(f"Skipped existing: {len(skipped_paths)} file(s)")
+    print(f"Total ready: {len(output_paths) + len(skipped_paths)} file(s)")
     print(f"Output directory: {OUTPUT_DIR}")
     print(f"Output shape: ({OUTPUT_HEIGHT}, {OUTPUT_WIDTH})")
     print(f"Output dtype: {OUTPUT_DTYPE}")
