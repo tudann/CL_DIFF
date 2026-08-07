@@ -435,7 +435,7 @@ def create_argparser():
         # stub数据
         # input_raw_dir="/home/lqg/code_8T/24/lt/data_make/17_360view/slice",
         # 蓝牙数据20
-        input_raw_dir="/home/lqg/code_8T/24/lt/data_make/20_19_47/1024",
+        # input_raw_dir="/home/lqg/code_8T/24/lt/data_make/20_19_47/1024",
         # 蓝牙数据23
         input_raw_dir="/home/lqg/code_8T/24/lt/data_make/23_23_43/1024",
         raw_height=1024,
