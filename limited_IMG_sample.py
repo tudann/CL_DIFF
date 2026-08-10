@@ -536,7 +536,7 @@ def create_argparser():
         num_heads=4,
         num_heads_upsample=-1,
         num_head_channels=-1,
-        attention_resolutions="16,8",
+        attention_resolutions="24,12",
         channel_mult="",
         dropout=0.0,
         use_checkpoint=False,

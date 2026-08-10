@@ -69,7 +69,7 @@ def create_CL_IMG_model(
     condition_channels=1,
     channel_mult="",
     use_checkpoint=False,
-    attention_resolutions="16, 8",
+    attention_resolutions="24,12",
     num_heads=1,
     num_head_channels=-1,
     num_heads_upsample=-1,
