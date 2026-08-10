@@ -643,18 +643,22 @@ class GaussianDiffusion:
         if not 0.0 <= warm_start_strength <= 1.0:
             raise ValueError("warm_start_strength must be between 0 and 1.")
 
-        start_timestep = int(round(warm_start_strength * (self.num_timesteps - 1)))
-        start_t = th.full(
-            (shape[0],), start_timestep, device=device, dtype=th.long
-        )
-        if start_timestep > 0:
+        if warm_start_strength == 0.0:
+            # Disabled: preserve the original full p-sample warm-start path.
+            start_timestep = self.num_timesteps - 1
+            img = bad_img
+        else:
+            start_timestep = int(
+                round(warm_start_strength * (self.num_timesteps - 1))
+            )
+            start_t = th.full(
+                (shape[0],), start_timestep, device=device, dtype=th.long
+            )
             img = self.q_sample(
                 bad_img,
                 start_t,
                 noise=th.randn_like(bad_img),
             )
-        else:
-            img = bad_img
 
         indices = list(range(start_timestep, -1, -1))
         if progress:
