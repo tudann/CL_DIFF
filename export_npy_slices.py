@@ -5,13 +5,28 @@ preserves slice-to-slice grayscale differences and is therefore suitable for
 checking training data.
 """
 
-import argparse
 import csv
 import os
 from pathlib import Path
 
 import cv2
 import numpy as np
+
+
+# ===== Edit these settings before running the script =====
+# INPUT_PATH can be one .npy file or a directory containing .npy files.
+INPUT_PATH = r"/path/to/input.npy"
+OUTPUT_DIR = r"/path/to/png_output"
+
+# The project volume layout is (x, y, z), so z-slice export uses axis 2.
+AXIS = 2
+
+# "volume" preserves inter-slice grayscale differences.
+# "slice" stretches every slice independently for structure inspection.
+# "fixed" uses VALUE_MIN and VALUE_MAX below.
+NORMALIZATION = "volume"
+VALUE_MIN = None
+VALUE_MAX = None
 
 
 def collect_npy_files(input_path):
@@ -124,41 +139,16 @@ def export_volume(path, output_root, axis, normalization_mode, value_min, value_
     return volume.shape[axis]
 
 
-def create_argparser():
-    parser = argparse.ArgumentParser(
-        description="Export every slice of a 3-D NPY volume as a grayscale PNG."
-    )
-    parser.add_argument(
-        "input_path",
-        help="Path to one .npy file or a directory containing .npy files.",
-    )
-    parser.add_argument("output_dir", help="Directory used for exported PNG files.")
-    parser.add_argument(
-        "--axis",
-        type=int,
-        choices=(0, 1, 2),
-        default=2,
-        help="Slice axis. Default: 2 for the project's (x, y, z) layout.",
-    )
-    parser.add_argument(
-        "--normalization",
-        choices=("volume", "slice", "fixed"),
-        default="volume",
-        help=(
-            "PNG display normalization. 'volume' preserves inter-slice grayscale "
-            "differences; 'slice' enhances each slice separately; 'fixed' uses "
-            "--value-min/--value-max. Default: volume."
-        ),
-    )
-    parser.add_argument("--value-min", type=float, default=None)
-    parser.add_argument("--value-max", type=float, default=None)
-    return parser
-
-
 def main():
-    args = create_argparser().parse_args()
-    input_files = collect_npy_files(args.input_path)
-    output_root = Path(args.output_dir)
+    if AXIS not in (0, 1, 2):
+        raise ValueError("AXIS must be 0, 1, or 2.")
+    if NORMALIZATION not in ("volume", "slice", "fixed"):
+        raise ValueError(
+            'NORMALIZATION must be "volume", "slice", or "fixed".'
+        )
+
+    input_files = collect_npy_files(INPUT_PATH)
+    output_root = Path(OUTPUT_DIR)
     output_root.mkdir(parents=True, exist_ok=True)
 
     total_slices = 0
@@ -166,10 +156,10 @@ def main():
         total_slices += export_volume(
             input_file,
             output_root,
-            args.axis,
-            args.normalization,
-            args.value_min,
-            args.value_max,
+            AXIS,
+            NORMALIZATION,
+            VALUE_MIN,
+            VALUE_MAX,
         )
 
     print(
