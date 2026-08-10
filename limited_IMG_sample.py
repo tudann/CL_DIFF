@@ -397,7 +397,13 @@ def main():
     if args.sampler == "ddim":
         run_sampler = partial(diffusion.CL_IMG_ddim_sample_loop_test, eta=0.0)
     else:
-        run_sampler = partial(diffusion.CL_IMG_sample_loop_test)
+        run_sampler = partial(
+            diffusion.CL_IMG_sample_loop_test,
+            warm_start_strength=args.warm_start_strength,
+        )
+        print(
+            f"P-sample warm-start strength: {args.warm_start_strength:.3f}"
+        )
     re_dir = os.path.join(args.output_dir, "re")
     global_re_dir = os.path.join(args.output_dir, "re_global")
     comp_dir = os.path.join(args.output_dir, "comparison")
@@ -511,6 +517,7 @@ def create_argparser():
         sampler="p_sample",  # ddim or p_sample
         ddim_steps=25,
         p_sample_steps=25,
+        warm_start_strength=0.3,
         save_global_png=True,
         normalize_output_volume=False,
 
@@ -519,7 +526,7 @@ def create_argparser():
         # [Phantom+guss平滑] label 模型训练路径
         model_path="/home/lqg/code_8T/24/lt/CL_DIFF_v1/CL_DIFF/checkpoints/phantom_label_guss_lowcontrast_edge5.0_shareall/ema_npy_0.9999_150000.pt",
 
-        output_dir="/home/lqg/code_8T/24/lt/CL_DIFF_v1/result/lowcontrast_edge5.0_shareall/mpcb_150000_p25-test3",
+        output_dir="/home/lqg/code_8T/24/lt/CL_DIFF_v1/result/lowcontrast_edge5.0_shareall/mpcb_150000_p25-warm0.3",
         max_samples=0,
         slover_data="no",
         image_size=768,

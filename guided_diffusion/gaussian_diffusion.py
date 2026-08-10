@@ -627,6 +627,7 @@ class GaussianDiffusion:
             shape,
             slover_data,
             img_bz,
+            warm_start_strength=0.3,
             clip_denoised=True,
             denoised_fn=None,
             model_kwargs=None,
@@ -639,11 +640,23 @@ class GaussianDiffusion:
             print(device)
         assert isinstance(shape, (tuple, list))
 
-        # Warm-start from the CL center slice so its low-frequency gray level
-        # is retained while the conditional model removes reconstruction artifacts.
-        img = bad_img
-            
-        indices = list(range(self.num_timesteps))[::-1]
+        if not 0.0 <= warm_start_strength <= 1.0:
+            raise ValueError("warm_start_strength must be between 0 and 1.")
+
+        start_timestep = int(round(warm_start_strength * (self.num_timesteps - 1)))
+        start_t = th.full(
+            (shape[0],), start_timestep, device=device, dtype=th.long
+        )
+        if start_timestep > 0:
+            img = self.q_sample(
+                bad_img,
+                start_t,
+                noise=th.randn_like(bad_img),
+            )
+        else:
+            img = bad_img
+
+        indices = list(range(start_timestep, -1, -1))
         if progress:
             indices = tqdm(indices)
 
