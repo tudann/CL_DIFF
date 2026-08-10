@@ -517,7 +517,7 @@ def create_argparser():
         sampler="p_sample",  # ddim or p_sample
         ddim_steps=25,
         p_sample_steps=50,
-        warm_start_strength=0.1,
+        warm_start_strength=0.3,
         save_global_png=False,
         normalize_output_volume=False,
 
