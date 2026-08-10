@@ -517,7 +517,7 @@ def create_argparser():
         sampler="p_sample",  # ddim or p_sample
         ddim_steps=25,
         p_sample_steps=50,
-        warm_start_strength=0.3,
+        warm_start_strength=0.5,
         save_global_png=False,
         normalize_output_volume=False,
 
@@ -526,7 +526,7 @@ def create_argparser():
         # [Phantom+guss平滑] label 模型训练路径
         model_path="/home/lqg/code_8T/24/lt/CL_DIFF_v1/CL_DIFF/checkpoints/phantom_label_guss_lowcontrast_edge5.0_shareall/ema_npy_0.9999_150000.pt",
 
-        output_dir="/home/lqg/code_8T/24/lt/CL_DIFF_v1/result/lowcontrast_edge5.0_shareall/pcb_150000_p50-warm0.3",
+        output_dir="/home/lqg/code_8T/24/lt/CL_DIFF_v1/result/lowcontrast_edge5.0_shareall/pcb_150000_p50-warm0.5",
         max_samples=0,
         slover_data="no",
         image_size=768,
