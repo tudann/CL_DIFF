@@ -510,7 +510,7 @@ def create_argparser():
         # label_npy="/home/lqg/code_8T/24/lt/data_make/CL-data_make/output/evulate_data/pcb_phantom_npy/ct_fdk_npy/test_phantom_0001_cl_fdk.npy",
         # mpcb路径
         input_npy="/home/lqg/code_8T/24/lt/data_make/CL-data_make/output/evulate_data/mpcb_phantom_npy/cl_fdk_npy/phantom_0001_cl_fdk.npy",
-        label_npy="/home/lqg/code_8T/24/lt/data_make/CL-data_make/output/evulate_data/mpcb_phantom_npy/ct_fdk_npy/phantom_0001_cl_fdk.npy",
+        label_npy="/home/lqg/code_8T/24/lt/data_make/CL-data_make/output/evulate_data/mpcb_phantom_npy/phantom_0001.npy",
         # data_dir1="/home/lqg/code_8T/24/lt/data_make/CL-data_make/ct_label_npy",
         # data_dir2="/home/lqg/code_8T/24/lt/data_make/CL-data_make/cl_label_npy",
         batch_size=1,
