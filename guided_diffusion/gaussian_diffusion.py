@@ -639,10 +639,9 @@ class GaussianDiffusion:
             print(device)
         assert isinstance(shape, (tuple, list))
 
-        # Training evaluates the denoiser on noisy label samples x_t. Start
-        # conditional p-sampling from the matching Gaussian prior and provide
-        # the CL volume separately through img_bz.
-        img = th.randn_like(bad_img)
+        # Warm-start from the CL center slice so its low-frequency gray level
+        # is retained while the conditional model removes reconstruction artifacts.
+        img = bad_img
             
         indices = list(range(self.num_timesteps))[::-1]
         if progress:
