@@ -518,7 +518,7 @@ def create_argparser():
         ddim_steps=25,
         p_sample_steps=50,
         warm_start_strength=0.1,
-        save_global_png=True,
+        save_global_png=False,
         normalize_output_volume=False,
 
         # [CT] label 模型训练路径
