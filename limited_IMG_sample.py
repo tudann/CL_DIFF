@@ -493,11 +493,11 @@ def create_argparser():
         # 测试其他数据需要为空
         # input_raw_dir="",
         # stub数据
-        input_raw_dir="/home/lqg/code_8T/24/lt/data_make/17_360view/slice",
+        # input_raw_dir="/home/lqg/code_8T/24/lt/data_make/17_360view/slice",
         # 蓝牙数据20
         # input_raw_dir="/home/lqg/code_8T/24/lt/data_make/20_19_47/1024",
         # 蓝牙数据23
-        # input_raw_dir="/home/lqg/code_8T/24/lt/data_make/23_23_43/1024",
+        input_raw_dir="/home/lqg/code_8T/24/lt/data_make/23_23_43/1024",
         raw_height=1024,
         raw_width=1024,
         raw_dtype="float32",
@@ -517,7 +517,7 @@ def create_argparser():
         sampler="p_sample",  # ddim or p_sample
         ddim_steps=25,
         p_sample_steps=50,
-        warm_start_strength=0.8,
+        warm_start_strength=0,
         save_global_png=False,
         normalize_output_volume=False,
 
@@ -526,7 +526,7 @@ def create_argparser():
         # [Phantom+guss平滑] label 模型训练路径
         model_path="/home/lqg/code_8T/24/lt/CL_DIFF_v1/CL_DIFF/checkpoints/phantom_label_guss_lowcontrast_edge5.0_shareall/ema_npy_0.9999_150000.pt",
 
-        output_dir="/home/lqg/code_8T/24/lt/CL_DIFF_v1/result/lowcontrast_edge5.0_shareall/stub_150000_p50-warm0.8",
+        output_dir="/home/lqg/code_8T/24/lt/CL_DIFF_v1/result/lowcontrast_edge5.0_shareall/blue23_150000_p50-warm0",
         max_samples=0,
         slover_data="no",
         image_size=768,
