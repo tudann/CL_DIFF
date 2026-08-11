@@ -394,6 +394,23 @@ def main():
             normalization_mode=args.normalization_mode,
         )
 
+    input_value_range = getattr(data, "input_range", None)
+    if args.save_input_scale_npy or args.save_input_scale_png:
+        if args.normalization_mode != "volume" or input_value_range is None:
+            raise ValueError(
+                "Input-scale outputs require normalization_mode='volume' "
+                "with a single RAW or NPY input volume."
+            )
+        input_min, input_max = input_value_range
+        if (
+            not np.isfinite(input_min)
+            or not np.isfinite(input_max)
+            or input_max <= input_min
+        ):
+            raise ValueError(
+                f"Invalid input volume range: ({input_min}, {input_max})."
+            )
+
     if args.sampler == "ddim":
         run_sampler = partial(diffusion.CL_IMG_ddim_sample_loop_test, eta=0.0)
     else:
@@ -406,9 +423,12 @@ def main():
         )
     re_dir = os.path.join(args.output_dir, "re")
     global_re_dir = os.path.join(args.output_dir, "re_global")
+    input_scale_re_dir = os.path.join(args.output_dir, "re_input_scale")
     comp_dir = os.path.join(args.output_dir, "comparison")
     os.makedirs(re_dir, exist_ok=True)
     os.makedirs(global_re_dir, exist_ok=True)
+    if args.save_input_scale_png:
+        os.makedirs(input_scale_re_dir, exist_ok=True)
     os.makedirs(comp_dir, exist_ok=True)
 
     metrics_list = []
@@ -467,6 +487,42 @@ def main():
         else:
             volume = np.clip(volume, 0.0, 1.0).astype(np.float32)
         np.save(os.path.join(args.output_dir, f"{img_name}_re.npy"), volume)
+
+        input_scale_volume = None
+        if args.save_input_scale_npy or args.save_input_scale_png:
+            input_scale_volume = (
+                volume * (input_max - input_min) + input_min
+            ).astype(np.float32)
+
+        if args.save_input_scale_npy:
+            input_scale_path = os.path.join(
+                args.output_dir, f"{img_name}_re_input_scale.npy"
+            )
+            np.save(input_scale_path, input_scale_volume)
+            print(
+                f"Input-scale output saved: min={float(np.min(input_scale_volume)):.6g}, "
+                f"max={float(np.max(input_scale_volume)):.6g}, "
+                f"input_range=({input_min:.6g}, {input_max:.6g})"
+            )
+
+        if args.save_input_scale_png:
+            for z_idx in range(input_scale_volume.shape[2]):
+                input_scale_slice = input_scale_volume[:, :, z_idx]
+                png_slice = (
+                    np.clip(
+                        (input_scale_slice - input_min) / (input_max - input_min),
+                        0.0,
+                        1.0,
+                    )
+                    * 255
+                ).astype(np.uint8)
+                cv2.imwrite(
+                    os.path.join(
+                        input_scale_re_dir, f"{img_name}_z{z_idx:03d}.png"
+                    ),
+                    png_slice,
+                )
+
         print(
             f"Output volume before saving: min={volume_min:.6g}, "
             f"max={volume_max:.6g}, normalized={args.normalize_output_volume}"
@@ -520,6 +576,10 @@ def create_argparser():
         warm_start_strength=0.8,
         save_global_png=False,
         normalize_output_volume=False,
+        # Also save the normalized reconstruction mapped to the input volume range.
+        save_input_scale_npy=True,
+        # Save PNG slices rendered from the input-scale reconstruction volume.
+        save_input_scale_png=True,
 
         # [CT] label 模型训练路径
         # model_path="/home/lqg/code_8T/24/lt/CL_DIFF_v1/checkpoints/first_test/ema_npy_0.9999_250000.pt",
