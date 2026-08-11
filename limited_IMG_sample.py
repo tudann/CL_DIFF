@@ -545,15 +545,15 @@ def main():
 
 def create_argparser():
     defaults = dict(
-        gpu_id=1,
+        gpu_id=0,
         # 测试其他数据需要为空
-        input_raw_dir="",
+        # input_raw_dir="",
         # stub数据
         # input_raw_dir="/home/lqg/code_8T/24/lt/data_make/17_360view/slice",
         # 蓝牙数据20
         # input_raw_dir="/home/lqg/code_8T/24/lt/data_make/20_19_47/1024",
         # 蓝牙数据23
-        # input_raw_dir="/home/lqg/code_8T/24/lt/data_make/23_23_43/1024",
+        input_raw_dir="/home/lqg/code_8T/24/lt/data_make/23_23_43/1024",
         raw_height=1024,
         raw_width=1024,
         raw_dtype="float32",
@@ -577,16 +577,16 @@ def create_argparser():
         save_global_png=False,
         normalize_output_volume=False,
         # Also save the normalized reconstruction mapped to the input volume range.
-        save_input_scale_npy=True,
+        save_input_scale_npy=False,
         # Save PNG slices rendered from the input-scale reconstruction volume.
-        save_input_scale_png=True,
+        save_input_scale_png=False,
 
         # [CT] label 模型训练路径
         # model_path="/home/lqg/code_8T/24/lt/CL_DIFF_v1/checkpoints/first_test/ema_npy_0.9999_250000.pt",
         # [Phantom+guss平滑] label 模型训练路径
         model_path="/home/lqg/code_8T/24/lt/CL_DIFF_v1/CL_DIFF_attention_24_12/checkpoints/phantom_label_guss_lowcontrast_edge5.0_shareall/ema_npy_0.9999_120000.pt",
 
-        output_dir="/home/lqg/code_8T/24/lt/CL_DIFF_v1/result/attention_edge5.0_shareall/mpcb_120000_p50-warm0.8",
+        output_dir="/home/lqg/code_8T/24/lt/CL_DIFF_v1/result/attention_edge5.0_shareall/blue23_120000_p50-warm0.8",
         max_samples=0,
         slover_data="no",
         image_size=768,
