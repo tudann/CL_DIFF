@@ -573,7 +573,7 @@ def create_argparser():
         sampler="p_sample",  # ddim or p_sample
         ddim_steps=25,
         p_sample_steps=50,
-        warm_start_strength=0.8,
+        warm_start_strength=0.5,
         save_global_png=False,
         normalize_output_volume=False,
         # Also save the normalized reconstruction mapped to the input volume range.
@@ -584,9 +584,9 @@ def create_argparser():
         # [CT] label 模型训练路径
         # model_path="/home/lqg/code_8T/24/lt/CL_DIFF_v1/checkpoints/first_test/ema_npy_0.9999_250000.pt",
         # [Phantom+guss平滑] label 模型训练路径
-        model_path="/home/lqg/code_8T/24/lt/CL_DIFF_v1/CL_DIFF_attention_24_12/checkpoints/phantom_label_guss_lowcontrast_edge5.0_shareall/ema_npy_0.9999_120000.pt",
+        model_path="/home/lqg/code_8T/24/lt/CL_DIFF_v1/CL_DIFF_attention_24_12/checkpoints/phantom_label_guss_lowcontrast_edge5.0_shareall/ema_npy_0.9999_150000.pt",
 
-        output_dir="/home/lqg/code_8T/24/lt/CL_DIFF_v1/result/attention_edge5.0_shareall/blue23_120000_p50-warm0.8",
+        output_dir="/home/lqg/code_8T/24/lt/CL_DIFF_v1/result/attention_edge5.0_shareall/blue23_150000_p50-warm0.5",
         max_samples=0,
         slover_data="no",
         image_size=768,
