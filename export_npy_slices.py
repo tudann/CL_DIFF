@@ -15,8 +15,9 @@ import numpy as np
 
 # ===== Edit these settings before running the script =====
 # INPUT_PATH can be one .npy file or a directory containing .npy files.
-INPUT_PATH = r"/path/to/input.npy"
-OUTPUT_DIR = r"/path/to/png_output"
+INPUT_PATH = r"/home/lqg/code_8T/24/lt/data_make/CL-data_make/output/train_data/ct_label_npy/phantom_0001.npy"
+OUTPUT_DIR = r"/home/lqg/code_8T/24/lt/data_make/CL-data_make/output/train_data/ct_label_npy/case/phantom_0001"
+
 
 # The project volume layout is (x, y, z), so z-slice export uses axis 2.
 AXIS = 2
