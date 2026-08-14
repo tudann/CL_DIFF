@@ -1,8 +1,6 @@
 """Export slices from 3-D NPY volumes as grayscale PNG files.
 
-By default, all slices from one volume share the same display range. This
-preserves slice-to-slice grayscale differences and is therefore suitable for
-checking training data.
+Copy this file to export_npy_slices.py (gitignored) and edit INPUT_PATH / OUTPUT_DIR.
 """
 
 import csv
@@ -15,9 +13,8 @@ import numpy as np
 
 # ===== Edit these settings before running the script =====
 # INPUT_PATH can be one .npy file or a directory containing .npy files.
-INPUT_PATH = r"/home/lqg/code_8T/24/lt/data_make/CL-data_make/output/train_data/cl_label_npy/phantom_0019.npy"
-OUTPUT_DIR = r"/home/lqg/code_8T/24/lt/data_make/CL-data_make/output/train_data/cl_label_npy/case/phantom_0019"
-
+INPUT_PATH = r"/path/to/input.npy"
+OUTPUT_DIR = r"/path/to/png_output"
 
 # The project volume layout is (x, y, z), so z-slice export uses axis 2.
 AXIS = 2

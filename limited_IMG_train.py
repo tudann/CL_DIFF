@@ -173,13 +173,13 @@ def main():
 def create_argparser():
     defaults = dict(
         # ==== 运行相关 ====
-        gpu_id=1,
-        save_path="checkpoints/phantom_label_guss_lowcontrast_edge5.0_shareall",
+        gpu_id=0,
+        save_path="checkpoints/ct_degraded_lowcontrast_edge5.0_shareall",
 
         # ==== 数据相关 ====
         data_mode='npy',
         # data_dir1 is the phantom supervision label directory.
-        data_dir1="/home/lqg/code_8T/24/lt/data_make/CL-data_make/output/train_data/phantom_guss",
+        data_dir1="/home/lqg/code_8T/24/lt/data_make/CL-data_make/output/train_data/ct-sart/ct_sart_degraded",
         data_dir2="/home/lqg/code_8T/24/lt/data_make/CL-data_make/output/train_data/cl_label_npy",
         crop_x_start=127,
         crop_x_end=895,

@@ -26,6 +26,9 @@ checkpoints/
 *.btr
 *~
 
+# Machine-specific npy preview script (copy from export_npy_slices.py.example)
+export_npy_slices.py
+
 # Keep source only
 !limited_IMG_train.py
 !limited_IMG_sample.py
