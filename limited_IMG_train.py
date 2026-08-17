@@ -20,6 +20,7 @@ from guided_diffusion.resample import create_named_schedule_sampler #训练时�
 from guided_diffusion.script_util import (args_to_dict, add_dict_to_argparser, CL_IMG_create_model_and_diffusion) #模型创建、默认参数等；
 import torch as th
 from guided_diffusion.train_util import TrainLoop  #训练核心循环逻辑；
+from local_config import apply_local_overrides
 
 
 def main():
@@ -249,7 +250,7 @@ def create_argparser():
         resume_step = 0,
         fp16_scale_growth=1e-3,
     )
-
+    apply_local_overrides(defaults, __file__)
     parser = argparse.ArgumentParser()
     add_dict_to_argparser(parser, defaults)
     return parser

@@ -1,0 +1,21 @@
+# Copy to prepare_raw_slices.local.yaml on the server (gitignored).
+# Only keys you want to override need to appear here.
+
+input_dir: "/home/lqg/code_8T/24/sl/裸板/pcb14/10/10"
+output_dir: "/home/lqg/code_8T/24/lt/data_make/pcb14/10"
+
+raw_pattern: "*.raw"
+raw_dtype: float32
+raw_height: 2940
+raw_width: 2940
+raw_order: C
+
+output_height: 1024
+output_width: 1024
+output_dtype: float32
+
+# false skips complete existing outputs; true replaces them
+overwrite: false
+
+# validate only the first N files before resizing all; 0 = validate all
+validate_limit: 10

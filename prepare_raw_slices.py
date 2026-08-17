@@ -4,6 +4,8 @@ Validate 2940x2940 RAW slices and resize them to the v1 input format.
 The script validates every input file before writing any resized output.
 Output files remain one XY slice per RAW file, so they can be consumed by
 limited_IMG_sample.py with raw_height=1024 and raw_width=1024.
+
+Machine-specific paths can go in prepare_raw_slices.local.yaml (gitignored).
 """
 
 import csv
@@ -14,29 +16,62 @@ import re
 import cv2
 import numpy as np
 
+from local_config import apply_local_overrides
 
-PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 
-# Change INPUT_DIR if the real RAW directory is different on the server.
-INPUT_DIR = "/home/lqg/code_8T/24/sl/裸板/pcb14/10/10"
-OUTPUT_DIR = "/home/lqg/code_8T/24/lt/data_make/pcb14/10"
+DEFAULTS = dict(
+    input_dir="/home/lqg/code_8T/24/sl/裸板/pcb14/10/10",
+    output_dir="/home/lqg/code_8T/24/lt/data_make/pcb14/10",
+    raw_pattern="*.raw",
+    raw_dtype="float32",
+    raw_height=2940,
+    raw_width=2940,
+    raw_order="C",
+    output_height=1024,
+    output_width=1024,
+    output_dtype="float32",
+    overwrite=False,
+    validate_limit=10,
+)
 
-RAW_PATTERN = "*.raw"
-RAW_DTYPE = np.dtype("float32")
-RAW_HEIGHT = 2940
-RAW_WIDTH = 2940
-RAW_ORDER = "C"
+INPUT_DIR = DEFAULTS["input_dir"]
+OUTPUT_DIR = DEFAULTS["output_dir"]
+RAW_PATTERN = DEFAULTS["raw_pattern"]
+RAW_DTYPE = np.dtype(DEFAULTS["raw_dtype"])
+RAW_HEIGHT = DEFAULTS["raw_height"]
+RAW_WIDTH = DEFAULTS["raw_width"]
+RAW_ORDER = DEFAULTS["raw_order"]
+OUTPUT_HEIGHT = DEFAULTS["output_height"]
+OUTPUT_WIDTH = DEFAULTS["output_width"]
+OUTPUT_DTYPE = np.dtype(DEFAULTS["output_dtype"])
+OVERWRITE = DEFAULTS["overwrite"]
+VALIDATE_LIMIT = DEFAULTS["validate_limit"]
 
-OUTPUT_HEIGHT = 1024
-OUTPUT_WIDTH = 1024
-OUTPUT_DTYPE = np.dtype("float32")
 
-# False skips complete existing outputs; True replaces them.
-OVERWRITE = False
+def apply_runtime_config(config):
+    global INPUT_DIR, OUTPUT_DIR, RAW_PATTERN, RAW_DTYPE
+    global RAW_HEIGHT, RAW_WIDTH, RAW_ORDER
+    global OUTPUT_HEIGHT, OUTPUT_WIDTH, OUTPUT_DTYPE
+    global OVERWRITE, VALIDATE_LIMIT
 
-# Validate only the first N naturally sorted files before resizing all files.
-# Set to 0 to validate the complete input directory.
-VALIDATE_LIMIT = 10
+    INPUT_DIR = config["input_dir"]
+    OUTPUT_DIR = config["output_dir"]
+    RAW_PATTERN = config["raw_pattern"]
+    RAW_DTYPE = np.dtype(config["raw_dtype"])
+    RAW_HEIGHT = int(config["raw_height"])
+    RAW_WIDTH = int(config["raw_width"])
+    RAW_ORDER = config["raw_order"]
+    OUTPUT_HEIGHT = int(config["output_height"])
+    OUTPUT_WIDTH = int(config["output_width"])
+    OUTPUT_DTYPE = np.dtype(config["output_dtype"])
+    OVERWRITE = bool(config["overwrite"])
+    VALIDATE_LIMIT = int(config["validate_limit"])
+
+
+def load_config():
+    config = apply_local_overrides(DEFAULTS.copy(), __file__)
+    apply_runtime_config(config)
+    return config
 
 
 def natural_sort_key(path):
@@ -152,7 +187,7 @@ def resize_files(paths):
                 raise FileExistsError(
                     f"Existing output has an unexpected size: {output_path} "
                     f"({output_bytes} bytes, expected {expected_output_bytes}). "
-                    "Remove the incomplete file or set OVERWRITE=True."
+                    "Remove the incomplete file or set overwrite=true in local config."
                 )
             skipped_paths.append(output_path)
             if (index + 1) % 10 == 0 or index + 1 == len(paths):
@@ -190,6 +225,7 @@ def resize_files(paths):
 
 
 def main():
+    load_config()
     input_paths = sorted(
         glob.glob(os.path.join(INPUT_DIR, RAW_PATTERN)),
         key=natural_sort_key,

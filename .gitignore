@@ -29,6 +29,10 @@ checkpoints/
 # Machine-specific npy preview script (copy from export_npy_slices.py.example)
 export_npy_slices.py
 
+# Machine-specific train/sample overrides (copy from *.local.yaml.example)
+*.local.yaml
+*.local.yml
+
 # Keep source only
 !limited_IMG_train.py
 !limited_IMG_sample.py

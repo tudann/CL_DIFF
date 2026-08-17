@@ -1,0 +1,16 @@
+# Copy to limited_IMG_sample.local.yaml on the server (gitignored).
+# Only keys you want to override need to appear here.
+# CLI flags still win over this file.
+
+gpu_id: 0
+input_raw_dir: "/home/lqg/code_8T/24/lt/data_make/pcb14/10"
+independent_raws: true
+model_path: "/home/lqg/code_8T/24/lt/CL_DIFF_v1/CL_DIFF_attention_24_12/checkpoints/ct_degraded_lowcontrast_edge5.0_shareall/ema_npy_0.9999_150000.pt"
+output_dir: "/home/lqg/code_8T/24/lt/CL_DIFF_v1/result/ct_degraded_attention_edge5.0_shareall/pcb14-10_150000_p50-warm0.5"
+
+sampler: p_sample
+p_sample_steps: 50
+warm_start_strength: 0.5
+
+# input_npy: ""
+# label_npy: ""

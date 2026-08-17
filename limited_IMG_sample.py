@@ -21,6 +21,7 @@ from guided_diffusion.image_datasets import (
     volume_value_range,
 )
 from guided_diffusion.script_util import add_dict_to_argparser, args_to_dict, CL_IMG_create_model_and_diffusion
+from local_config import apply_local_overrides
 
 
 class SingleCLVolumeDataset:
@@ -685,6 +686,7 @@ def create_argparser():
         use_mmap=True,
         normalization_mode="volume",
     )
+    apply_local_overrides(defaults, __file__)
     parser = argparse.ArgumentParser()
     add_dict_to_argparser(parser, defaults)
     return parser

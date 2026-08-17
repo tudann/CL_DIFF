@@ -1,0 +1,12 @@
+# Copy to limited_IMG_train.local.yaml on the server (gitignored).
+# Only keys you want to override need to appear here.
+# CLI flags still win over this file.
+
+gpu_id: 0
+save_path: checkpoints/ct_degraded_817
+data_dir1: "/home/lqg/code_8T/24/lt/data_make/CL-data_make/output/train_data/ct-sart/ct_sart_degraded"
+data_dir2: "/home/lqg/code_8T/24/lt/data_make/CL-data_make/output/train_data/cl_label_npy"
+
+# resume_checkpoint: ""
+# resume_step: 0
+# wandb_run_name: ""
