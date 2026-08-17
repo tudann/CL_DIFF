@@ -18,8 +18,8 @@ import numpy as np
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 
 # Change INPUT_DIR if the real RAW directory is different on the server.
-INPUT_DIR = "/home/lqg/code_8T/24/lt/data_make/24_23_47/slice"
-OUTPUT_DIR = "/home/lqg/code_8T/24/lt/data_make/24_23_47/1024"
+INPUT_DIR = "/home/lqg/code_8T/24/sl/裸板/pcb14/10/10"
+OUTPUT_DIR = "/home/lqg/code_8T/24/lt/data_make/pcb14/10"
 
 RAW_PATTERN = "*.raw"
 RAW_DTYPE = np.dtype("float32")
