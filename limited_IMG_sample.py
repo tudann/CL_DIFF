@@ -131,6 +131,7 @@ class SingleCLRawSliceDataset:
         raw_order="C",
         volume_name="",
         normalization_mode="volume",
+        independent_raws=False,
     ):
         if num_input_slices % 2 != 1:
             raise ValueError("num_input_slices must be odd, e.g. 3 for [z-1,z,z+1].")
@@ -150,9 +151,11 @@ class SingleCLRawSliceDataset:
         self.raw_order = raw_order
         if normalization_mode not in ("slice", "volume"):
             raise ValueError("normalization_mode must be 'slice' or 'volume'.")
-        self.normalization_mode = normalization_mode
+        self.independent_raws = bool(independent_raws)
+        self.normalization_mode = "slice" if self.independent_raws else normalization_mode
         self.expected_values = raw_height * raw_width
         self.stem = volume_name or os.path.basename(os.path.abspath(input_raw_dir))
+        self.slice_ranges = [None] * len(self.raw_files)
 
         crop_h = crop_x[1] - crop_x[0]
         crop_w = crop_y[1] - crop_y[0]
@@ -160,7 +163,13 @@ class SingleCLRawSliceDataset:
             raise ValueError(f"Crop size ({crop_h}, {crop_w}) does not match image_size={image_size}.")
 
         self.input_range = None
-        if self.normalization_mode == "volume":
+        if self.independent_raws:
+            print(
+                f"Independent RAW mode: {len(self.raw_files)} files from {input_raw_dir}. "
+                f"2.5D input repeats each slice {self.num_input_slices} times; "
+                "normalization is per file."
+            )
+        elif self.normalization_mode == "volume":
             self.input_range = self._compute_volume_range()
 
     def __len__(self):
@@ -192,12 +201,20 @@ class SingleCLRawSliceDataset:
         return min_value, max_value
 
     def __getitem__(self, z):
+        x0, x1 = self.crop_x
+        y0, y1 = self.crop_y
+        if self.independent_raws:
+            cropped = np.asarray(self._read_raw_slice(z)[x0:x1, y0:y1], dtype=np.float32)
+            self.slice_ranges[z] = (float(np.min(cropped)), float(np.max(cropped)))
+            normalized = normalize_image(cropped, None)
+            cond_stack = np.stack([normalized] * self.num_input_slices, axis=0)
+            cond_stack = th.from_numpy(cond_stack[None, ...].astype(np.float32))
+            sample_name = os.path.splitext(os.path.basename(self.raw_files[z]))[0]
+            return None, cond_stack, sample_name
+
         z_count = len(self)
         half = self.num_input_slices // 2
         z_indices = [min(max(z + offset, 0), z_count - 1) for offset in range(-half, half + 1)]
-
-        x0, x1 = self.crop_x
-        y0, y1 = self.crop_y
         cond_slices = [
             np.asarray(self._read_raw_slice(zi)[x0:x1, y0:y1], dtype=np.float32)
             for zi in z_indices
@@ -293,7 +310,7 @@ def save_comparison(path, cl_img, re_img, gt_img=None, metrics=None):
 
 def save_slice_outputs(re_dir, comp_dir, img_name, z_idx, cl_img, result_img, gt_img=None):
     """Save one slice and calculate its optional paired-image metrics."""
-    slice_name = f"{img_name}_z{z_idx:03d}"
+    slice_name = img_name if z_idx is None else f"{img_name}_z{z_idx:03d}"
     re_path = os.path.join(re_dir, f"{slice_name}.png")
     cv2.imwrite(re_path, to_uint8(result_img))
 
@@ -313,6 +330,8 @@ def save_slice_outputs(re_dir, comp_dir, img_name, z_idx, cl_img, result_img, gt
 
 def main():
     args = create_argparser().parse_args()
+    if args.independent_raws and not args.input_raw_dir:
+        raise ValueError("independent_raws only applies when input_raw_dir is set.")
     if args.sampler == "ddim":
         # True conditional DDIM with the configured number of steps.
         if args.ddim_steps <= 0:
@@ -366,6 +385,7 @@ def main():
             raw_order=args.raw_order,
             volume_name=args.raw_volume_name,
             normalization_mode=args.normalization_mode,
+            independent_raws=args.independent_raws,
         )
     elif args.input_npy:
         data = SingleCLVolumeDataset(
@@ -395,7 +415,8 @@ def main():
         )
 
     input_value_range = getattr(data, "input_range", None)
-    if args.save_input_scale_npy or args.save_input_scale_png:
+    input_min = input_max = None
+    if (args.save_input_scale_npy or args.save_input_scale_png) and not args.independent_raws:
         if args.normalization_mode != "volume" or input_value_range is None:
             raise ValueError(
                 "Input-scale outputs require normalization_mode='volume' "
@@ -442,8 +463,12 @@ def main():
             img, bad_img, sample_name = data_batch
             if isinstance(sample_name, (list, tuple)):
                 sample_name = sample_name[0]
-            img_name = sample_name.rsplit("_z", 1)[0]
-            z_idx = int(sample_name.rsplit("_z", 1)[1])
+            if args.independent_raws:
+                img_name = sample_name
+                z_idx = None
+            else:
+                img_name = sample_name.rsplit("_z", 1)[0]
+                z_idx = int(sample_name.rsplit("_z", 1)[1])
 
             cond_img = bad_img.to(device, non_blocking=True)
             center_channel = cond_img.shape[1] // 2
@@ -457,7 +482,39 @@ def main():
                 img_bz=cond_img,
             )
             result_img = np.squeeze(result_img[0, 0].cpu().numpy()).copy()
-            volume_slices.append(result_img.astype(np.float32))
+            if not args.independent_raws:
+                volume_slices.append(result_img.astype(np.float32))
+            elif args.save_re_npy or args.save_input_scale_npy or args.save_input_scale_png:
+                result_norm = np.clip(result_img, 0.0, 1.0).astype(np.float32)
+                if args.save_re_npy:
+                    np.save(os.path.join(args.output_dir, f"{img_name}_re.npy"), result_norm)
+                if args.save_input_scale_npy or args.save_input_scale_png:
+                    slice_min, slice_max = data.slice_ranges[sample_idx]
+                    if (
+                        slice_min is None
+                        or slice_max is None
+                        or not np.isfinite(slice_min)
+                        or not np.isfinite(slice_max)
+                        or slice_max <= slice_min
+                    ):
+                        raise ValueError(
+                            f"Invalid per-file input range for {img_name}: "
+                            f"({slice_min}, {slice_max})."
+                        )
+                    input_scale_slice = (
+                        result_norm * (slice_max - slice_min) + slice_min
+                    ).astype(np.float32)
+                    if args.save_input_scale_npy:
+                        np.save(
+                            os.path.join(args.output_dir, f"{img_name}_re_input_scale.npy"),
+                            input_scale_slice,
+                        )
+                    if args.save_input_scale_png:
+                        png_slice = (result_norm * 255).astype(np.uint8)
+                        cv2.imwrite(
+                            os.path.join(input_scale_re_dir, f"{img_name}.png"),
+                            png_slice,
+                        )
 
             gt_img = None
             if img is not None:
@@ -550,17 +607,21 @@ def create_argparser():
         # 测试其他数据需要为空
         # input_raw_dir="",
         # stub数据
-        input_raw_dir="/home/lqg/code_8T/24/lt/data_make/17_360view/slice",
+        # input_raw_dir="/home/lqg/code_8T/24/lt/data_make/17_360view/slice",
         # 蓝牙数据20
         # input_raw_dir="/home/lqg/code_8T/24/lt/data_make/20_19_47/1024",
         # 蓝牙数据23
         # input_raw_dir="/home/lqg/code_8T/24/lt/data_make/23_23_43/1024",
+        # pcb14数据
+        input_raw_dir="/home/lqg/code_8T/24/sl/裸板/pcb14/10/10",
         raw_height=1024,
         raw_width=1024,
         raw_dtype="float32",
         raw_pattern="*.raw",
         raw_order="C",
         raw_volume_name="real_fdk",
+        # True: 文件夹内每个 raw 单独测试，2.5D 重复同一张，不做邻层拼接
+        independent_raws=True,
 
         # # 同源phantom路径
         # input_npy="/home/lqg/code_8T/24/lt/data_make/CL-data_make/output/evulate_data/pcb_phantom_npy/cl_fdk_npy/test_phantom_0001_cl_fdk.npy",
@@ -591,7 +652,7 @@ def create_argparser():
         model_path="/home/lqg/code_8T/24/lt/CL_DIFF_v1/CL_DIFF_attention_24_12/checkpoints/ct_degraded_lowcontrast_edge5.0_shareall/ema_npy_0.9999_150000.pt",
         
         
-        output_dir="/home/lqg/code_8T/24/lt/CL_DIFF_v1/result/ct_degraded_attention_edge5.0_shareall/stub17_150000_p50-warm0.5",
+        output_dir="/home/lqg/code_8T/24/lt/CL_DIFF_v1/result/ct_degraded_attention_edge5.0_shareall/pcb14-10_150000_p50-warm0.5",
         max_samples=0,
         slover_data="no",
         image_size=768,
