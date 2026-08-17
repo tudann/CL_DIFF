@@ -486,7 +486,8 @@ def main():
             volume, _, _ = normalize_volume(volume)
         else:
             volume = np.clip(volume, 0.0, 1.0).astype(np.float32)
-        np.save(os.path.join(args.output_dir, f"{img_name}_re.npy"), volume)
+        if args.save_re_npy:
+            np.save(os.path.join(args.output_dir, f"{img_name}_re.npy"), volume)
 
         input_scale_volume = None
         if args.save_input_scale_npy or args.save_input_scale_png:
@@ -547,13 +548,13 @@ def create_argparser():
     defaults = dict(
         gpu_id=0,
         # 测试其他数据需要为空
-        # input_raw_dir="",
+        input_raw_dir="",
         # stub数据
         # input_raw_dir="/home/lqg/code_8T/24/lt/data_make/17_360view/slice",
         # 蓝牙数据20
         # input_raw_dir="/home/lqg/code_8T/24/lt/data_make/20_19_47/1024",
         # 蓝牙数据23
-        input_raw_dir="/home/lqg/code_8T/24/lt/data_make/23_23_43/1024",
+        # input_raw_dir="/home/lqg/code_8T/24/lt/data_make/23_23_43/1024",
         raw_height=1024,
         raw_width=1024,
         raw_dtype="float32",
@@ -575,6 +576,7 @@ def create_argparser():
         p_sample_steps=50,
         warm_start_strength=0.5,
         save_global_png=False,
+        save_re_npy=False,
         normalize_output_volume=False,
         # Also save the normalized reconstruction mapped to the input volume range.
         save_input_scale_npy=False,
@@ -584,9 +586,12 @@ def create_argparser():
         # [CT] label 模型训练路径
         # model_path="/home/lqg/code_8T/24/lt/CL_DIFF_v1/checkpoints/first_test/ema_npy_0.9999_250000.pt",
         # [Phantom+guss平滑] label 模型训练路径
-        model_path="/home/lqg/code_8T/24/lt/CL_DIFF_v1/CL_DIFF_attention_24_12/checkpoints/phantom_label_guss_lowcontrast_edge5.0_shareall/ema_npy_0.9999_150000.pt",
-
-        output_dir="/home/lqg/code_8T/24/lt/CL_DIFF_v1/result/attention_edge5.0_shareall/blue23_150000_p50-warm0.5",
+        # model_path="/home/lqg/code_8T/24/lt/CL_DIFF_v1/CL_DIFF_attention_24_12/checkpoints/phantom_label_guss_lowcontrast_edge5.0_shareall/ema_npy_0.9999_150000.pt",
+        # [ct_degraded] label 模型训练路径
+        model_path="/home/lqg/code_8T/24/lt/CL_DIFF_v1/CL_DIFF_attention_24_12/checkpoints/ct_degraded_lowcontrast_edge5.0_shareall/ema_npy_0.9999_150000.pt",
+        
+        
+        output_dir="/home/lqg/code_8T/24/lt/CL_DIFF_v1/result/ct_degraded_attention_edge5.0_shareall/mpcb_150000_p50-warm0.5",
         max_samples=0,
         slover_data="no",
         image_size=768,
