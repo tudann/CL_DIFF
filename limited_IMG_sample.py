@@ -613,7 +613,7 @@ def create_argparser():
         # 蓝牙数据23
         # input_raw_dir="/home/lqg/code_8T/24/lt/data_make/23_23_43/1024",
         # pcb14数据
-        input_raw_dir="/home/lqg/code_8T/24/sl/裸板/pcb14/10/10",
+        input_raw_dir="/home/lqg/code_8T/24/lt/data_make/pcb14/10",
         raw_height=1024,
         raw_width=1024,
         raw_dtype="float32",
