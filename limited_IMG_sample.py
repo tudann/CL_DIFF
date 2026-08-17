@@ -550,11 +550,11 @@ def create_argparser():
         # 测试其他数据需要为空
         # input_raw_dir="",
         # stub数据
-        # input_raw_dir="/home/lqg/code_8T/24/lt/data_make/17_360view/slice",
+        input_raw_dir="/home/lqg/code_8T/24/lt/data_make/17_360view/slice",
         # 蓝牙数据20
         # input_raw_dir="/home/lqg/code_8T/24/lt/data_make/20_19_47/1024",
         # 蓝牙数据23
-        input_raw_dir="/home/lqg/code_8T/24/lt/data_make/23_23_43/1024",
+        # input_raw_dir="/home/lqg/code_8T/24/lt/data_make/23_23_43/1024",
         raw_height=1024,
         raw_width=1024,
         raw_dtype="float32",
@@ -591,7 +591,7 @@ def create_argparser():
         model_path="/home/lqg/code_8T/24/lt/CL_DIFF_v1/CL_DIFF_attention_24_12/checkpoints/ct_degraded_lowcontrast_edge5.0_shareall/ema_npy_0.9999_150000.pt",
         
         
-        output_dir="/home/lqg/code_8T/24/lt/CL_DIFF_v1/result/ct_degraded_attention_edge5.0_shareall/blue23_150000_p50-warm0.5",
+        output_dir="/home/lqg/code_8T/24/lt/CL_DIFF_v1/result/ct_degraded_attention_edge5.0_shareall/stub17_150000_p50-warm0.5",
         max_samples=0,
         slover_data="no",
         image_size=768,
