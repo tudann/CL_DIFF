@@ -29,6 +29,8 @@ def CL_IMG_create_model_and_diffusion(
     use_new_attention_order,
     device,
     condition_channels=1,
+    use_afr=False,
+    afr_kernel_size=7,
 ):
     model = create_CL_IMG_model(
         image_size,
@@ -46,6 +48,8 @@ def CL_IMG_create_model_and_diffusion(
         resblock_updown=resblock_updown,
         use_fp16=use_fp16,
         use_new_attention_order=use_new_attention_order,
+        use_afr=use_afr,
+        afr_kernel_size=afr_kernel_size,
     )
 
     diffusion = create_gaussian_diffusion(
@@ -78,6 +82,8 @@ def create_CL_IMG_model(
     resblock_updown=False,
     use_fp16=False,
     use_new_attention_order=False,
+    use_afr=False,
+    afr_kernel_size=7,
    
 ):
 ###########  channel_mult模型每个 downsample 阶段的 channel 数 #########################################################################################
@@ -123,6 +129,8 @@ def create_CL_IMG_model(
         use_scale_shift_norm=use_scale_shift_norm,
         resblock_updown=resblock_updown,
         use_new_attention_order=use_new_attention_order,
+        use_afr=use_afr,
+        afr_kernel_size=afr_kernel_size,
     )
 
 

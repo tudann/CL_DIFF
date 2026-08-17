@@ -33,6 +33,9 @@ export_npy_slices.py
 *.local.yaml
 *.local.yml
 
+# Local reference copy, not used by training
+afr.py
+
 # Keep source only
 !limited_IMG_train.py
 !limited_IMG_sample.py

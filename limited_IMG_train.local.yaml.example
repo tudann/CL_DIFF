@@ -45,6 +45,9 @@ resblock_updown: false
 use_fp16: false
 use_new_attention_order: false
 learn_sigma: true
+# AFR: Anisotropic Feature Representation. false 与旧 checkpoint 结构一致。
+use_afr: false
+afr_kernel_size: 7
 
 # ==== 扩散过程 ====
 diffusion_steps: 1000

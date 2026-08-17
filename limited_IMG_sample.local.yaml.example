@@ -68,6 +68,9 @@ resblock_updown: false
 use_fp16: false
 use_new_attention_order: false
 learn_sigma: true
+# 须与训练 checkpoint 一致：旧权重用 false，AFR 训练的权重用 true
+use_afr: false
+afr_kernel_size: 7
 
 # ==== 扩散过程 ====
 diffusion_steps: 1000

@@ -12,6 +12,7 @@ from torch.nn import SiLU
 
 from . fp16_util import convert_module_to_f16, convert_module_to_f32
 from guided_diffusion.FFT_Transformer import FSAS, DFFN, TransformerBlock,LayerNorm
+from guided_diffusion.afr_block import AnisotropicFeatureRepresentation
 from . nn import (
     checkpoint,
     conv_nd,
@@ -1014,6 +1015,8 @@ class UNetModel_cl_img_test(nn.Module):
             w=1.50,
             cond_prob=0.2,
             weighted_condition=False,
+            use_afr=False,
+            afr_kernel_size=7,
     ):
         super().__init__()
 
@@ -1041,6 +1044,8 @@ class UNetModel_cl_img_test(nn.Module):
         self.cond_prob = th.tensor(cond_prob)
         self.weighted_condition = weighted_condition
         self.w = w
+        self.use_afr = bool(use_afr)
+        self.afr_kernel_size = int(afr_kernel_size)
 
         ####时间步嵌入层#######################################################################################
 
@@ -1054,6 +1059,24 @@ class UNetModel_cl_img_test(nn.Module):
 
         ch = input_ch = int(channel_mult[0] * model_channels)
         model_input_channels = in_channels + condition_channels
+
+        # AFR sits on the concatenated noisy target + 2.5D condition, before
+        # any downsampling.  When use_afr is False the module is not created,
+        # so existing checkpoints load without extra keys.
+        self.afr = (
+            AnisotropicFeatureRepresentation(
+                model_input_channels, kernel_size=self.afr_kernel_size
+            )
+            if self.use_afr
+            else None
+        )
+        if self.use_afr:
+            print(
+                f"AFR enabled: channels={model_input_channels}, "
+                f"kernel_size={self.afr_kernel_size}"
+            )
+        else:
+            print("AFR disabled")
 
         ####输入层###########################################################################################
 
@@ -1204,6 +1227,8 @@ class UNetModel_cl_img_test(nn.Module):
         self.input_blocks.apply(convert_module_to_f16)
         self.middle_block.apply(convert_module_to_f16)
         self.output_blocks.apply(convert_module_to_f16)
+        if self.afr is not None:
+            self.afr.apply(convert_module_to_f16)
 
     def convert_to_fp32(self):
         """
@@ -1212,6 +1237,8 @@ class UNetModel_cl_img_test(nn.Module):
         self.input_blocks.apply(convert_module_to_f32)
         self.middle_block.apply(convert_module_to_f32)
         self.output_blocks.apply(convert_module_to_f32)
+        if self.afr is not None:
+            self.afr.apply(convert_module_to_f32)
 
     def _forward(self, ipt, timesteps, weighted_condition):
         """
@@ -1231,7 +1258,9 @@ class UNetModel_cl_img_test(nn.Module):
         emb = self.time_embed(timestep_embedding(timesteps, self.model_channels))
 #输入图 x 与 2.5D CL 条件图 limited_img 拼接
         h = th.cat([x.type(self.dtype), c_ * limited_img.type(self.dtype)], dim=1)
-        
+        if self.afr is not None:
+            h = self.afr(h)
+
         hs = []
         for module in self.input_blocks:
             h = module(h, emb)
