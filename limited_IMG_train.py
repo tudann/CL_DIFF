@@ -174,7 +174,7 @@ def create_argparser():
     defaults = dict(
         # ==== 运行相关 ====
         gpu_id=0,
-        save_path="checkpoints/ct_degraded_lowcontrast_edge5.0_shareall",
+        save_path="checkpoints/ct_degraded_817",
 
         # ==== 数据相关 ====
         data_mode='npy',
@@ -192,11 +192,11 @@ def create_argparser():
         persistent_workers=True,
         shuffle=False,
         augment_condition=True,
-        condition_aug_probability=0.5,
-        condition_contrast_min=0.3,
+        condition_aug_probability=0.3,
+        condition_contrast_min=0.6,
         condition_contrast_max=0.8,
         condition_noise_std=0.02,
-        condition_blur_probability=0.25,
+        condition_blur_probability=0.1,
 
         # ==== 模型结构相关 ====
         image_size=768,
@@ -237,7 +237,7 @@ def create_argparser():
         save_interval=30000,
         loss_log_interval=1,
         boundary_loss_weight=0.1,
-        boundary_edge_weight=5.0,  # 3.0
+        boundary_edge_weight=3.0,  # 3.0
         use_wandb=True,
         wandb_project="CL_DIFF",
         wandb_entity="",
