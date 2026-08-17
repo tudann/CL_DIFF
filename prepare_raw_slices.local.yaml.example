@@ -1,21 +1,24 @@
 # Copy to prepare_raw_slices.local.yaml on the server (gitignored).
 # Only keys you want to override need to appear here.
 
+# ==== 输入 ====
 input_dir: "/home/lqg/code_8T/24/sl/裸板/pcb14/10/10"
+raw_pattern: "*.raw"        # 匹配文件名的 glob，例如 "slice_*.raw"
+raw_dtype: float32           # 文件存储类型：float32 / float64 / int16 / uint16 等
+raw_height: 2940             # 原始文件的高度（像素）
+raw_width: 2940              # 原始文件的宽度（像素）
+raw_order: C                 # 内存布局：C = 行优先，F = 列优先
+
+# ==== 输出 ====
 output_dir: "/home/lqg/code_8T/24/lt/data_make/pcb14/10"
+output_height: 1024          # resize 后高度
+output_width: 1024           # resize 后宽度
+output_dtype: float32        # 输出文件存储类型
+# 插值方法（缩小用 INTER_AREA，放大用 INTER_LINEAR 或 INTER_CUBIC）：
+# INTER_AREA / INTER_LINEAR / INTER_CUBIC / INTER_NEAREST / INTER_LANCZOS4
+resize_interpolation: INTER_AREA
 
-raw_pattern: "*.raw"
-raw_dtype: float32
-raw_height: 2940
-raw_width: 2940
-raw_order: C
-
-output_height: 1024
-output_width: 1024
-output_dtype: float32
-
-# false skips complete existing outputs; true replaces them
-overwrite: false
-
-# validate only the first N files before resizing all; 0 = validate all
-validate_limit: 10
+# ==== 行为控制 ====
+overwrite: false             # true: 强制重写已有输出；false: 大小正确则跳过
+validate_limit: 10           # resize 前只验证前 N 个文件；0 = 验证全部
+progress_interval: 10        # 每处理多少个文件打印一次进度

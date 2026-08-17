@@ -19,19 +19,39 @@ import numpy as np
 from local_config import apply_local_overrides
 
 
+_INTERP_MAP = {
+    "INTER_AREA":    cv2.INTER_AREA,
+    "INTER_LINEAR":  cv2.INTER_LINEAR,
+    "INTER_CUBIC":   cv2.INTER_CUBIC,
+    "INTER_NEAREST": cv2.INTER_NEAREST,
+    "INTER_LANCZOS4": cv2.INTER_LANCZOS4,
+}
+
 DEFAULTS = dict(
+    # ==== 输入 ====
     input_dir="/home/lqg/code_8T/24/sl/裸板/pcb14/10/10",
-    output_dir="/home/lqg/code_8T/24/lt/data_make/pcb14/10",
     raw_pattern="*.raw",
     raw_dtype="float32",
     raw_height=2940,
     raw_width=2940,
+    # 内存布局：C = 行优先（C 语言）, F = 列优先（Fortran）
     raw_order="C",
+
+    # ==== 输出 ====
+    output_dir="/home/lqg/code_8T/24/lt/data_make/pcb14/10",
     output_height=1024,
     output_width=1024,
     output_dtype="float32",
+    # 插值方法: INTER_AREA / INTER_LINEAR / INTER_CUBIC / INTER_NEAREST / INTER_LANCZOS4
+    resize_interpolation="INTER_AREA",
+
+    # ==== 行为控制 ====
+    # false: 跳过已有且大小正确的输出；true: 强制覆盖
     overwrite=False,
+    # 在 resize 前只验证前 N 个文件；0 = 验证全部
     validate_limit=10,
+    # 每处理多少个文件打印一次进度
+    progress_interval=10,
 )
 
 INPUT_DIR = DEFAULTS["input_dir"]
@@ -44,15 +64,17 @@ RAW_ORDER = DEFAULTS["raw_order"]
 OUTPUT_HEIGHT = DEFAULTS["output_height"]
 OUTPUT_WIDTH = DEFAULTS["output_width"]
 OUTPUT_DTYPE = np.dtype(DEFAULTS["output_dtype"])
+RESIZE_INTERPOLATION = _INTERP_MAP[DEFAULTS["resize_interpolation"]]
 OVERWRITE = DEFAULTS["overwrite"]
 VALIDATE_LIMIT = DEFAULTS["validate_limit"]
+PROGRESS_INTERVAL = DEFAULTS["progress_interval"]
 
 
 def apply_runtime_config(config):
     global INPUT_DIR, OUTPUT_DIR, RAW_PATTERN, RAW_DTYPE
     global RAW_HEIGHT, RAW_WIDTH, RAW_ORDER
-    global OUTPUT_HEIGHT, OUTPUT_WIDTH, OUTPUT_DTYPE
-    global OVERWRITE, VALIDATE_LIMIT
+    global OUTPUT_HEIGHT, OUTPUT_WIDTH, OUTPUT_DTYPE, RESIZE_INTERPOLATION
+    global OVERWRITE, VALIDATE_LIMIT, PROGRESS_INTERVAL
 
     INPUT_DIR = config["input_dir"]
     OUTPUT_DIR = config["output_dir"]
@@ -64,8 +86,16 @@ def apply_runtime_config(config):
     OUTPUT_HEIGHT = int(config["output_height"])
     OUTPUT_WIDTH = int(config["output_width"])
     OUTPUT_DTYPE = np.dtype(config["output_dtype"])
+    interp_key = config["resize_interpolation"]
+    if interp_key not in _INTERP_MAP:
+        raise ValueError(
+            f"Unknown resize_interpolation {interp_key!r}. "
+            f"Choose from: {list(_INTERP_MAP)}"
+        )
+    RESIZE_INTERPOLATION = _INTERP_MAP[interp_key]
     OVERWRITE = bool(config["overwrite"])
     VALIDATE_LIMIT = int(config["validate_limit"])
+    PROGRESS_INTERVAL = int(config["progress_interval"])
 
 
 def load_config():
@@ -93,8 +123,7 @@ def validate_files(paths):
     errors = []
 
     print(f"Found {len(paths)} RAW files.")
-    print(f"Expected shape: ({RAW_HEIGHT}, {RAW_WIDTH})")
-    print(f"Expected dtype: {RAW_DTYPE}")
+    print(f"Expected shape: ({RAW_HEIGHT}, {RAW_WIDTH}), dtype: {RAW_DTYPE}, order: {RAW_ORDER}")
     print(f"Expected bytes per file: {expected_file_bytes}")
 
     for index, path in enumerate(paths):
@@ -140,7 +169,7 @@ def validate_files(paths):
 
         records.append(record)
 
-        if (index + 1) % 10 == 0 or index + 1 == len(paths):
+        if (index + 1) % PROGRESS_INTERVAL == 0 or index + 1 == len(paths):
             print(f"Validated {index + 1}/{len(paths)} files.")
 
     return records, errors
@@ -190,7 +219,7 @@ def resize_files(paths):
                     "Remove the incomplete file or set overwrite=true in local config."
                 )
             skipped_paths.append(output_path)
-            if (index + 1) % 10 == 0 or index + 1 == len(paths):
+            if (index + 1) % PROGRESS_INTERVAL == 0 or index + 1 == len(paths):
                 print(
                     f"Processed {index + 1}/{len(paths)} files "
                     f"(resized={len(output_paths)}, skipped={len(skipped_paths)})."
@@ -202,7 +231,7 @@ def resize_files(paths):
         resized = cv2.resize(
             source,
             (OUTPUT_WIDTH, OUTPUT_HEIGHT),
-            interpolation=cv2.INTER_AREA,
+            interpolation=RESIZE_INTERPOLATION,
         )
 
         if resized.shape != (OUTPUT_HEIGHT, OUTPUT_WIDTH):
@@ -215,7 +244,7 @@ def resize_files(paths):
         resized.astype(OUTPUT_DTYPE, copy=False).tofile(output_path)
         output_paths.append(output_path)
 
-        if (index + 1) % 10 == 0 or index + 1 == len(paths):
+        if (index + 1) % PROGRESS_INTERVAL == 0 or index + 1 == len(paths):
             print(
                 f"Processed {index + 1}/{len(paths)} files "
                 f"(resized={len(output_paths)}, skipped={len(skipped_paths)})."
@@ -257,8 +286,7 @@ def main():
     print(f"Skipped existing: {len(skipped_paths)} file(s)")
     print(f"Total ready: {len(output_paths) + len(skipped_paths)} file(s)")
     print(f"Output directory: {OUTPUT_DIR}")
-    print(f"Output shape: ({OUTPUT_HEIGHT}, {OUTPUT_WIDTH})")
-    print(f"Output dtype: {OUTPUT_DTYPE}")
+    print(f"Output shape: ({OUTPUT_HEIGHT}, {OUTPUT_WIDTH}), dtype: {OUTPUT_DTYPE}")
 
 
 if __name__ == "__main__":

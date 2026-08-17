@@ -1,12 +1,82 @@
 # Copy to limited_IMG_train.local.yaml on the server (gitignored).
-# Only keys you want to override need to appear here.
 # CLI flags still win over this file.
 
+# ==== 运行相关 ====
 gpu_id: 0
 save_path: checkpoints/ct_degraded_817
-data_dir1: "/home/lqg/code_8T/24/lt/data_make/CL-data_make/output/train_data/ct-sart/ct_sart_degraded"
-data_dir2: "/home/lqg/code_8T/24/lt/data_make/CL-data_make/output/train_data/cl_label_npy"
 
-# resume_checkpoint: ""
-# resume_step: 0
-# wandb_run_name: ""
+# ==== 数据相关 ====
+data_mode: npy               # 数据模式
+# data_dir1: CT / phantom 监督 label 目录
+data_dir1: "/home/lqg/code_8T/24/lt/data_make/CL-data_make/output/train_data/ct-sart/ct_sart_degraded"
+# data_dir2: CL 输入 label 目录
+data_dir2: "/home/lqg/code_8T/24/lt/data_make/CL-data_make/output/train_data/cl_label_npy"
+crop_x_start: 127
+crop_x_end: 895
+crop_y_start: 127
+crop_y_end: 895
+use_mmap: true
+normalization_mode: volume   # volume / slice
+num_workers: 4
+pin_memory: true
+persistent_workers: true
+shuffle: false
+augment_condition: true
+condition_aug_probability: 0.3
+condition_contrast_min: 0.6
+condition_contrast_max: 0.8
+condition_noise_std: 0.02
+condition_blur_probability: 0.1
+
+# ==== 模型结构 ====
+image_size: 768
+condition_channels: 3        # 2.5D 输入通道数，须为奇数
+num_channels: 64
+num_res_blocks: 2
+num_heads: 4
+num_heads_upsample: -1
+num_head_channels: -1
+attention_resolutions: "24,12"
+channel_mult: ""
+dropout: 0.0
+use_checkpoint: false
+use_scale_shift_norm: true
+resblock_updown: false
+use_fp16: false
+use_new_attention_order: false
+learn_sigma: true
+
+# ==== 扩散过程 ====
+diffusion_steps: 1000
+noise_schedule: linear
+timestep_respacing: ""
+use_kl: false
+predict_xstart: false
+rescale_timesteps: false
+rescale_learned_sigmas: false
+
+# ==== 训练参数 ====
+lr: 0.0001
+batch_size: 2
+schedule_sampler: uniform
+weight_decay: 0.0
+lr_anneal_steps: 150000
+microbatch: -1               # -1 表示与 batch_size 相同
+ema_rate: "0,0.9999"
+log_interval: 1000
+save_interval: 30000
+loss_log_interval: 1
+boundary_loss_weight: 0.1
+boundary_edge_weight: 3.0
+use_wandb: true
+wandb_project: CL_DIFF
+wandb_entity: ""
+wandb_run_name: ""
+wandb_mode: ""               # online / offline / 留空用默认
+wandb_dir: ""
+wandb_log_interval: 100
+resume_checkpoint: ""
+resume_step: 0
+fp16_scale_growth: 0.001
+
+# W&B API key 请放在 wandb_config.py（不进 git），不要写在本文件
