@@ -48,6 +48,9 @@ learn_sigma: true
 # AFR: Anisotropic Feature Representation. false 与旧 checkpoint 结构一致。
 use_afr: false
 afr_kernel_size: 7
+# ILD: Interlayer Leakage Decoupling. 把 2.5D 条件拆成当前层 / 泄漏残差 / 邻层共有。
+# false 与旧 checkpoint 结构一致；true 需重新训练，采样时必须与训练一致。
+use_ild: false
 
 # ==== 扩散过程 ====
 diffusion_steps: 1000

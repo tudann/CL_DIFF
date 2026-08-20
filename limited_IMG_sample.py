@@ -332,7 +332,11 @@ def save_slice_outputs(re_dir, comp_dir, img_name, z_idx, cl_img, result_img, gt
 def main():
     args = create_argparser().parse_args()
     if args.independent_raws and not args.input_raw_dir:
-        raise ValueError("independent_raws only applies when input_raw_dir is set.")
+        print(
+            "independent_raws is ignored because input_raw_dir is empty; "
+            "using input_npy or data_dir instead."
+        )
+        args.independent_raws = False
     if args.sampler == "ddim":
         # True conditional DDIM with the configured number of steps.
         if args.ddim_steps <= 0:
@@ -360,7 +364,7 @@ def main():
                 "resblock_updown", "use_fp16", "use_new_attention_order", "learn_sigma",
                 "diffusion_steps", "noise_schedule", "timestep_respacing", "use_kl",
                 "predict_xstart", "rescale_timesteps", "rescale_learned_sigmas",
-                "condition_channels", "use_afr", "afr_kernel_size",
+                "condition_channels", "use_afr", "afr_kernel_size", "use_ild",
             ],
         ),
         device=device,
@@ -674,6 +678,7 @@ def create_argparser():
         learn_sigma=True,
         use_afr=False,
         afr_kernel_size=7,
+        use_ild=False,
         diffusion_steps=1000,
         noise_schedule="linear",
         timestep_respacing="",  # selected automatically from sampler and step count

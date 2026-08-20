@@ -13,6 +13,7 @@ from torch.nn import SiLU
 from . fp16_util import convert_module_to_f16, convert_module_to_f32
 from guided_diffusion.FFT_Transformer import FSAS, DFFN, TransformerBlock,LayerNorm
 from guided_diffusion.afr_block import AnisotropicFeatureRepresentation
+from guided_diffusion.ild_block import InterlayerLeakageDecoupling
 from . nn import (
     checkpoint,
     conv_nd,
@@ -1017,6 +1018,7 @@ class UNetModel_cl_img_test(nn.Module):
             weighted_condition=False,
             use_afr=False,
             afr_kernel_size=7,
+            use_ild=False,
     ):
         super().__init__()
 
@@ -1046,6 +1048,7 @@ class UNetModel_cl_img_test(nn.Module):
         self.w = w
         self.use_afr = bool(use_afr)
         self.afr_kernel_size = int(afr_kernel_size)
+        self.use_ild = bool(use_ild)
 
         ####时间步嵌入层#######################################################################################
 
@@ -1077,6 +1080,19 @@ class UNetModel_cl_img_test(nn.Module):
             )
         else:
             print("AFR disabled")
+
+        # ILD rewrites the 2.5D CL condition before concat.  When use_ild is
+        # False the module is not created, so existing checkpoints load
+        # without extra keys.
+        self.ild = (
+            InterlayerLeakageDecoupling(condition_channels)
+            if self.use_ild
+            else None
+        )
+        if self.use_ild:
+            print(f"ILD enabled: condition_channels={condition_channels}")
+        else:
+            print("ILD disabled")
 
         ####输入层###########################################################################################
 
@@ -1229,6 +1245,8 @@ class UNetModel_cl_img_test(nn.Module):
         self.output_blocks.apply(convert_module_to_f16)
         if self.afr is not None:
             self.afr.apply(convert_module_to_f16)
+        if self.ild is not None:
+            self.ild.apply(convert_module_to_f16)
 
     def convert_to_fp32(self):
         """
@@ -1239,6 +1257,8 @@ class UNetModel_cl_img_test(nn.Module):
         self.output_blocks.apply(convert_module_to_f32)
         if self.afr is not None:
             self.afr.apply(convert_module_to_f32)
+        if self.ild is not None:
+            self.ild.apply(convert_module_to_f32)
 
     def _forward(self, ipt, timesteps, weighted_condition):
         """
@@ -1257,7 +1277,10 @@ class UNetModel_cl_img_test(nn.Module):
 ###用timestep_embedding() 得到一个 [batch, model_channels] 的时间特征，再投影成 time_embed_dim，用于后续残差块作为条件。
         emb = self.time_embed(timestep_embedding(timesteps, self.model_channels))
 #输入图 x 与 2.5D CL 条件图 limited_img 拼接
-        h = th.cat([x.type(self.dtype), c_ * limited_img.type(self.dtype)], dim=1)
+        cond = c_ * limited_img.type(self.dtype)
+        if self.ild is not None:
+            cond = self.ild(cond)
+        h = th.cat([x.type(self.dtype), cond], dim=1)
         if self.afr is not None:
             h = self.afr(h)
 

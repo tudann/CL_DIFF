@@ -92,7 +92,8 @@ def main():
                             "resblock_updown", "use_fp16", "use_new_attention_order", "learn_sigma",
                             "diffusion_steps", "noise_schedule", "timestep_respacing", "use_kl",
                             "predict_xstart", "rescale_timesteps", "rescale_learned_sigmas",
-                            "condition_channels", "use_afr", "afr_kernel_size"
+                            "condition_channels", "use_afr", "afr_kernel_size",
+                            "use_ild",
                         ]
         ),
         device=device,
@@ -218,6 +219,7 @@ def create_argparser():
         learn_sigma=True,
         use_afr=False,
         afr_kernel_size=7,
+        use_ild=False,
 
         # ==== 扩散相关 ====
         diffusion_steps=1000,
