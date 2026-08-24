@@ -38,6 +38,7 @@ class SingleCLVolumeDataset:
         normalization_mode="volume",
         percentile_low=1.0,
         percentile_high=99.0,
+        independent_slices=False,
     ):
         if num_input_slices % 2 != 1:
             raise ValueError("num_input_slices must be odd, e.g. 3 for [z-1,z,z+1].")
@@ -54,6 +55,7 @@ class SingleCLVolumeDataset:
         self.normalization_mode = validate_normalization_mode(normalization_mode)
         self.percentile_low = float(percentile_low)
         self.percentile_high = float(percentile_high)
+        self.independent_slices = bool(independent_slices)
         self.stem = os.path.splitext(os.path.basename(input_npy))[0]
 
         if self.input_volume.ndim != 3:
@@ -71,7 +73,13 @@ class SingleCLVolumeDataset:
 
         self.input_range = None
         self.label_range = None
-        if self.normalization_mode in ("volume", "percentile"):
+        if self.independent_slices:
+            print(
+                "Independent slice mode: each z is tested alone by repeating "
+                f"the current slice {self.num_input_slices} times (no 2.5D neighbors). "
+                "Per-slice min-max is used; volume/percentile windows are ignored."
+            )
+        elif self.normalization_mode in ("volume", "percentile"):
             self.input_range = volume_normalization_range(
                 self.input_volume,
                 self.crop_x,
@@ -102,6 +110,24 @@ class SingleCLVolumeDataset:
             yield self[z]
 
     def __getitem__(self, z):
+        x0, x1 = self.crop_x
+        y0, y1 = self.crop_y
+        if self.independent_slices:
+            cropped = np.asarray(self.input_volume[x0:x1, y0:y1, z], dtype=np.float32)
+            normalized = normalize_image(cropped, None)
+            cond_stack = np.stack([normalized] * self.num_input_slices, axis=0)
+            cond_stack = th.from_numpy(cond_stack[None, ...].astype(np.float32))
+            if self.label_volume is None:
+                label_slice = None
+            else:
+                label_slice = np.asarray(
+                    self.label_volume[x0:x1, y0:y1, z], dtype=np.float32
+                )
+                label_slice = normalize_image(label_slice, None)[None, :, :].astype(
+                    np.float32
+                )
+            return label_slice, cond_stack, f"{self.stem}_z{z:03d}"
+
         z_count = self.input_volume.shape[2]
         half = self.num_input_slices // 2
         z_indices = [min(max(z + offset, 0), z_count - 1) for offset in range(-half, half + 1)]
@@ -372,10 +398,10 @@ def save_slice_outputs(re_dir, comp_dir, img_name, z_idx, cl_img, result_img, gt
 
 def main():
     args = create_argparser().parse_args()
-    if args.independent_raws and not args.input_raw_dir:
+    if args.independent_raws and not args.input_raw_dir and not args.input_npy:
         print(
-            "independent_raws is ignored because input_raw_dir is empty; "
-            "using input_npy or data_dir instead."
+            "independent_raws is ignored because both input_raw_dir and "
+            "input_npy are empty; data_dir batch mode still uses 2.5D neighbors."
         )
         args.independent_raws = False
     if args.sampler == "ddim":
@@ -447,6 +473,7 @@ def main():
             normalization_mode=args.normalization_mode,
             percentile_low=args.percentile_low,
             percentile_high=args.percentile_high,
+            independent_slices=args.independent_raws,
         )
     else:
         data = load_CL_IMG_data(
@@ -515,7 +542,8 @@ def main():
             img, bad_img, sample_name = data_batch
             if isinstance(sample_name, (list, tuple)):
                 sample_name = sample_name[0]
-            if args.independent_raws:
+            per_file_raw = bool(args.input_raw_dir and args.independent_raws)
+            if per_file_raw:
                 img_name = sample_name
                 z_idx = None
             else:
@@ -534,7 +562,7 @@ def main():
                 img_bz=cond_img,
             )
             result_img = np.squeeze(result_img[0, 0].cpu().numpy()).copy()
-            if not args.independent_raws:
+            if not per_file_raw:
                 volume_slices.append(result_img.astype(np.float32))
             elif args.save_re_npy or args.save_input_scale_npy or args.save_input_scale_png:
                 result_norm = np.clip(result_img, 0.0, 1.0).astype(np.float32)

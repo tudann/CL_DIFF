@@ -18,7 +18,8 @@ raw_dtype: float32
 raw_pattern: "*.raw"
 raw_order: C                 # C = 行优先, F = 列优先
 raw_volume_name: real_fdk
-# true: 每个 raw 独立测试，2.5D 重复同一张；false: 按 z 邻层拼 2.5D
+# true: 每张单独测，不拼邻层（当前层重复成 3 通道以匹配 2.5D 权重）
+# RAW 文件夹和单个 NPY 都生效；data_dir 批量模式仍会忽略
 independent_raws: true
 
 # --- 方式 2: 单个 NPY 体积（测 input_raw_dir 时留空） ---
