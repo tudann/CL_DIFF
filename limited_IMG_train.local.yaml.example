@@ -16,7 +16,9 @@ crop_x_end: 895
 crop_y_start: 127
 crop_y_end: 895
 use_mmap: true
-normalization_mode: volume   # volume / slice
+normalization_mode: volume   # volume / slice / percentile
+percentile_low: 1.0          # 仅 percentile 模式：crop 体上的低分位
+percentile_high: 99.0
 num_workers: 4
 pin_memory: true
 persistent_workers: true

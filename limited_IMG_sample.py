@@ -18,7 +18,8 @@ from guided_diffusion import logger
 from guided_diffusion.image_datasets import (
     load_CL_IMG_data,
     normalize_image,
-    volume_value_range,
+    validate_normalization_mode,
+    volume_normalization_range,
 )
 from guided_diffusion.script_util import add_dict_to_argparser, args_to_dict, CL_IMG_create_model_and_diffusion
 from local_config import apply_local_overrides
@@ -35,6 +36,8 @@ class SingleCLVolumeDataset:
         crop_y=(127, 895),
         use_mmap=True,
         normalization_mode="volume",
+        percentile_low=1.0,
+        percentile_high=99.0,
     ):
         if num_input_slices % 2 != 1:
             raise ValueError("num_input_slices must be odd, e.g. 3 for [z-1,z,z+1].")
@@ -48,9 +51,9 @@ class SingleCLVolumeDataset:
         self.num_input_slices = num_input_slices
         self.crop_x = crop_x
         self.crop_y = crop_y
-        if normalization_mode not in ("slice", "volume"):
-            raise ValueError("normalization_mode must be 'slice' or 'volume'.")
-        self.normalization_mode = normalization_mode
+        self.normalization_mode = validate_normalization_mode(normalization_mode)
+        self.percentile_low = float(percentile_low)
+        self.percentile_high = float(percentile_high)
         self.stem = os.path.splitext(os.path.basename(input_npy))[0]
 
         if self.input_volume.ndim != 3:
@@ -68,13 +71,27 @@ class SingleCLVolumeDataset:
 
         self.input_range = None
         self.label_range = None
-        if self.normalization_mode == "volume":
-            self.input_range = volume_value_range(
-                self.input_volume, self.crop_x, self.crop_y
+        if self.normalization_mode in ("volume", "percentile"):
+            self.input_range = volume_normalization_range(
+                self.input_volume,
+                self.crop_x,
+                self.crop_y,
+                self.normalization_mode,
+                self.percentile_low,
+                self.percentile_high,
+            )
+            print(
+                f"CL normalization ({self.normalization_mode}): "
+                f"range=({self.input_range[0]:.6g}, {self.input_range[1]:.6g})"
             )
             if self.label_volume is not None:
-                self.label_range = volume_value_range(
-                    self.label_volume, self.crop_x, self.crop_y
+                self.label_range = volume_normalization_range(
+                    self.label_volume,
+                    self.crop_x,
+                    self.crop_y,
+                    self.normalization_mode,
+                    self.percentile_low,
+                    self.percentile_high,
                 )
 
     def __len__(self):
@@ -132,6 +149,8 @@ class SingleCLRawSliceDataset:
         raw_order="C",
         volume_name="",
         normalization_mode="volume",
+        percentile_low=1.0,
+        percentile_high=99.0,
         independent_raws=False,
     ):
         if num_input_slices % 2 != 1:
@@ -150,10 +169,11 @@ class SingleCLRawSliceDataset:
         self.raw_width = raw_width
         self.raw_dtype = np.dtype(raw_dtype)
         self.raw_order = raw_order
-        if normalization_mode not in ("slice", "volume"):
-            raise ValueError("normalization_mode must be 'slice' or 'volume'.")
         self.independent_raws = bool(independent_raws)
-        self.normalization_mode = "slice" if self.independent_raws else normalization_mode
+        requested_mode = validate_normalization_mode(normalization_mode)
+        self.percentile_low = float(percentile_low)
+        self.percentile_high = float(percentile_high)
+        self.normalization_mode = "slice" if self.independent_raws else requested_mode
         self.expected_values = raw_height * raw_width
         self.stem = volume_name or os.path.basename(os.path.abspath(input_raw_dir))
         self.slice_ranges = [None] * len(self.raw_files)
@@ -165,13 +185,23 @@ class SingleCLRawSliceDataset:
 
         self.input_range = None
         if self.independent_raws:
+            if requested_mode == "percentile":
+                print(
+                    "Warning: independent_raws forces per-file min-max; "
+                    "percentile stretch is ignored. Set independent_raws: false "
+                    "to use p1-p99 on the whole RAW stack."
+                )
             print(
                 f"Independent RAW mode: {len(self.raw_files)} files from {input_raw_dir}. "
                 f"2.5D input repeats each slice {self.num_input_slices} times; "
                 "normalization is per file."
             )
-        elif self.normalization_mode == "volume":
+        elif self.normalization_mode in ("volume", "percentile"):
             self.input_range = self._compute_volume_range()
+            print(
+                f"CL normalization ({self.normalization_mode}): "
+                f"range=({self.input_range[0]:.6g}, {self.input_range[1]:.6g})"
+            )
 
     def __len__(self):
         return len(self.raw_files)
@@ -193,6 +223,17 @@ class SingleCLRawSliceDataset:
     def _compute_volume_range(self):
         x0, x1 = self.crop_x
         y0, y1 = self.crop_y
+        if self.normalization_mode == "percentile":
+            chunks = [
+                self._read_raw_slice(z)[x0:x1, y0:y1].ravel()
+                for z in range(len(self))
+            ]
+            values = np.concatenate(chunks)
+            low = float(np.percentile(values, self.percentile_low))
+            high = float(np.percentile(values, self.percentile_high))
+            if high <= low:
+                return float(np.min(values)), float(np.max(values))
+            return low, high
         min_value = float("inf")
         max_value = float("-inf")
         for z in range(len(self)):
@@ -390,6 +431,8 @@ def main():
             raw_order=args.raw_order,
             volume_name=args.raw_volume_name,
             normalization_mode=args.normalization_mode,
+            percentile_low=args.percentile_low,
+            percentile_high=args.percentile_high,
             independent_raws=args.independent_raws,
         )
     elif args.input_npy:
@@ -402,6 +445,8 @@ def main():
             crop_y=(args.crop_y_start, args.crop_y_end),
             use_mmap=args.use_mmap,
             normalization_mode=args.normalization_mode,
+            percentile_low=args.percentile_low,
+            percentile_high=args.percentile_high,
         )
     else:
         data = load_CL_IMG_data(
@@ -417,15 +462,17 @@ def main():
             crop_y_end=args.crop_y_end,
             use_mmap=args.use_mmap,
             normalization_mode=args.normalization_mode,
+            percentile_low=args.percentile_low,
+            percentile_high=args.percentile_high,
         )
 
     input_value_range = getattr(data, "input_range", None)
     input_min = input_max = None
     if (args.save_input_scale_npy or args.save_input_scale_png) and not args.independent_raws:
-        if args.normalization_mode != "volume" or input_value_range is None:
+        if args.normalization_mode not in ("volume", "percentile") or input_value_range is None:
             raise ValueError(
-                "Input-scale outputs require normalization_mode='volume' "
-                "with a single RAW or NPY input volume."
+                "Input-scale outputs require normalization_mode='volume' or "
+                "'percentile' with a single RAW or NPY input volume."
             )
         input_min, input_max = input_value_range
         if (
@@ -640,7 +687,7 @@ def create_argparser():
         sampler="p_sample",  # ddim or p_sample
         ddim_steps=25,
         p_sample_steps=50,
-        warm_start_strength=0.5,
+        warm_start_strength=0.25,
         save_global_png=False,
         save_re_npy=False,
         normalize_output_volume=False,
@@ -691,7 +738,9 @@ def create_argparser():
         crop_y_start=127,
         crop_y_end=895,
         use_mmap=True,
-        normalization_mode="volume",
+        normalization_mode="volume",  # volume / slice / percentile
+        percentile_low=1.0,
+        percentile_high=99.0,
     )
     apply_local_overrides(defaults, __file__)
     parser = argparse.ArgumentParser()

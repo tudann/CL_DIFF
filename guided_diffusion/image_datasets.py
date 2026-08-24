@@ -77,6 +77,18 @@ def _pair_npy_files(label_dir, cond_dir):
     return pairs
 
 
+NORMALIZATION_MODES = ("slice", "volume", "percentile")
+
+
+def validate_normalization_mode(mode):
+    if mode not in NORMALIZATION_MODES:
+        raise ValueError(
+            "normalization_mode must be 'slice', 'volume', or 'percentile', "
+            f"got {mode!r}."
+        )
+    return mode
+
+
 def normalize_image(img, value_range=None):
     if not isinstance(img, np.ndarray):
         raise ValueError("Input image must be a NumPy array")
@@ -94,13 +106,54 @@ def normalize_image(img, value_range=None):
 
 
 def volume_value_range(volume, crop_x=None, crop_y=None):
-    """Return one shared value range for every z-slice in a volume."""
+    """Return one shared min/max range for every z-slice in a volume."""
+    cropped = _cropped_volume(volume, crop_x, crop_y)
+    return float(np.min(cropped)), float(np.max(cropped))
+
+
+def volume_percentile_range(
+    volume, crop_x=None, crop_y=None, percentile_low=1.0, percentile_high=99.0
+):
+    """Return one shared percentile window for every z-slice in a volume."""
+    if not 0.0 <= percentile_low < percentile_high <= 100.0:
+        raise ValueError(
+            "Need 0 <= percentile_low < percentile_high <= 100, "
+            f"got {percentile_low} and {percentile_high}."
+        )
+    cropped = _cropped_volume(volume, crop_x, crop_y)
+    low = float(np.percentile(cropped, percentile_low))
+    high = float(np.percentile(cropped, percentile_high))
+    if high <= low:
+        return float(np.min(cropped)), float(np.max(cropped))
+    return low, high
+
+
+def volume_normalization_range(
+    volume,
+    crop_x=None,
+    crop_y=None,
+    normalization_mode="volume",
+    percentile_low=1.0,
+    percentile_high=99.0,
+):
+    """Shared crop range used by volume min-max or percentile stretch."""
+    if normalization_mode == "percentile":
+        return volume_percentile_range(
+            volume,
+            crop_x=crop_x,
+            crop_y=crop_y,
+            percentile_low=percentile_low,
+            percentile_high=percentile_high,
+        )
+    return volume_value_range(volume, crop_x=crop_x, crop_y=crop_y)
+
+
+def _cropped_volume(volume, crop_x, crop_y):
     if volume.ndim != 3:
         raise ValueError("Input volume must be a 3D array")
     x0, x1 = crop_x or (0, volume.shape[0])
     y0, y1 = crop_y or (0, volume.shape[1])
-    cropped = volume[x0:x1, y0:y1, :]
-    return float(np.min(cropped)), float(np.max(cropped))
+    return volume[x0:x1, y0:y1, :]
 
 
 class CLVolumeSliceDataset(Dataset):
@@ -119,6 +172,8 @@ class CLVolumeSliceDataset(Dataset):
         crop_y=(127, 895),
         use_mmap=True,
         normalization_mode="volume",
+        percentile_low=1.0,
+        percentile_high=99.0,
         augment_condition=False,
         condition_aug_probability=0.5,
         condition_contrast_min=0.3,
@@ -136,9 +191,9 @@ class CLVolumeSliceDataset(Dataset):
         self.crop_x = crop_x
         self.crop_y = crop_y
         self.use_mmap = use_mmap
-        if normalization_mode not in ("slice", "volume"):
-            raise ValueError("normalization_mode must be 'slice' or 'volume'.")
-        self.normalization_mode = normalization_mode
+        self.normalization_mode = validate_normalization_mode(normalization_mode)
+        self.percentile_low = float(percentile_low)
+        self.percentile_high = float(percentile_high)
         self.augment_condition = augment_condition
         self.condition_aug_probability = condition_aug_probability
         self.condition_contrast_min = condition_contrast_min
@@ -166,12 +221,24 @@ class CLVolumeSliceDataset(Dataset):
                     f"CT/CL volume shape mismatch: {label_path} {label_volume.shape} vs "
                     f"{self.cond_paths[pair_idx]} {cond_volume.shape}"
                 )
-            if self.normalization_mode == "volume":
-                self._normalization_ranges[label_path] = volume_value_range(
-                    label_volume, self.crop_x, self.crop_y
+            if self.normalization_mode in ("volume", "percentile"):
+                self._normalization_ranges[label_path] = volume_normalization_range(
+                    label_volume,
+                    self.crop_x,
+                    self.crop_y,
+                    self.normalization_mode,
+                    self.percentile_low,
+                    self.percentile_high,
                 )
-                self._normalization_ranges[self.cond_paths[pair_idx]] = volume_value_range(
-                    cond_volume, self.crop_x, self.crop_y
+                self._normalization_ranges[self.cond_paths[pair_idx]] = (
+                    volume_normalization_range(
+                        cond_volume,
+                        self.crop_x,
+                        self.crop_y,
+                        self.normalization_mode,
+                        self.percentile_low,
+                        self.percentile_high,
+                    )
                 )
             for z in range(label_volume.shape[2]):
                 self.indices.append((pair_idx, z))
@@ -246,6 +313,8 @@ def load_CL_IMG_data(
         crop_y_end=895,
         use_mmap=True,
         normalization_mode="volume",
+        percentile_low=1.0,
+        percentile_high=99.0,
         num_workers=4,
         pin_memory=True,
         persistent_workers=True,
@@ -272,6 +341,8 @@ def load_CL_IMG_data(
         crop_y=(crop_y_start, crop_y_end),
         use_mmap=use_mmap,
         normalization_mode=normalization_mode,
+        percentile_low=percentile_low,
+        percentile_high=percentile_high,
         augment_condition=(mode == "train") if augment_condition is None else augment_condition,
         condition_aug_probability=condition_aug_probability,
         condition_contrast_min=condition_contrast_min,
