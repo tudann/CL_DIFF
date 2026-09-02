@@ -15,11 +15,8 @@ from functools import partial
 from skimage.metrics import peak_signal_noise_ratio as psnr, structural_similarity as ssim, mean_squared_error as mse
 
 from guided_diffusion import logger
-from torch.utils.data import DataLoader
-
 from guided_diffusion.image_datasets import (
-    CLVolumeSliceDataset,
-    _pair_npy_files,
+    load_CL_IMG_data,
     normalize_image,
     validate_normalization_mode,
     volume_normalization_range,
@@ -330,89 +327,30 @@ def normalize_volume(volume):
     return normalized.astype(np.float32), min_value, max_value
 
 
-def _valid_value_range(value_range):
-    if value_range is None:
-        return False
-    lo, hi = value_range
-    return np.isfinite(lo) and np.isfinite(hi) and hi > lo
+def affine_align_pred_to_gt(pred, gt):
+    """Fit pred_aligned = a * pred + b to match gt in least-squares sense."""
+    pred = np.clip(pred.astype(np.float64), 0.0, 1.0)
+    gt = np.clip(gt.astype(np.float64), 0.0, 1.0)
+    x = pred.ravel()
+    y = gt.ravel()
+    if np.allclose(x, x[0]):
+        offset = float(np.mean(y - x))
+        aligned = pred + offset
+    else:
+        design = np.stack([x, np.ones_like(x)], axis=1)
+        scale, bias = np.linalg.lstsq(design, y, rcond=None)[0]
+        aligned = scale * pred + bias
+    return np.clip(aligned, 0.0, 1.0).astype(np.float32)
 
 
-def denormalize_from_range(img, value_range):
-    lo, hi = value_range
-    return img.astype(np.float32) * (hi - lo) + lo
-
-
-def normalize_to_range(img, value_range):
-    lo, hi = value_range
-    if hi == lo:
-        return np.zeros_like(img, dtype=np.float32)
-    return np.clip((img.astype(np.float32) - lo) / (hi - lo), 0.0, 1.0)
-
-
-def remap_pred_to_label_range(pred, input_range, label_range):
-    """Map model output from CL-normalized [0,1] into the GT label window [0,1]."""
-    pred_raw = denormalize_from_range(pred, input_range)
-    return normalize_to_range(pred_raw, label_range)
-
-
-def prepare_metric_images(pred, gt, input_range, label_range, unified_label_range):
+def prepare_metric_images(pred, gt, metrics_align="none"):
     gt_metric = np.clip(gt, 0.0, 1.0).astype(np.float32)
-    if (
-        not unified_label_range
-        or not _valid_value_range(input_range)
-        or not _valid_value_range(label_range)
-    ):
-        return np.clip(pred, 0.0, 1.0).astype(np.float32), gt_metric
-    pred_metric = remap_pred_to_label_range(pred, input_range, label_range)
+    pred_metric = np.clip(pred, 0.0, 1.0).astype(np.float32)
+    if metrics_align == "affine":
+        pred_metric = affine_align_pred_to_gt(pred_metric, gt_metric)
+    elif metrics_align != "none":
+        raise ValueError(f"Unsupported metrics_align: {metrics_align}")
     return pred_metric, gt_metric
-
-
-def resolve_metric_ranges(data_source, data_kind, sample_idx, z_idx):
-    if data_source is None:
-        return None, None
-
-    if data_kind == "volume":
-        ds = data_source
-        if (
-            ds.input_range is not None
-            and ds.label_range is not None
-            and _valid_value_range(ds.input_range)
-            and _valid_value_range(ds.label_range)
-        ):
-            return ds.input_range, ds.label_range
-        if ds.independent_slices and ds.label_volume is not None and z_idx is not None:
-            x0, x1 = ds.crop_x
-            y0, y1 = ds.crop_y
-            cl_slice = ds.input_volume[x0:x1, y0:y1, z_idx]
-            gt_slice = ds.label_volume[x0:x1, y0:y1, z_idx]
-            return (
-                (float(np.min(cl_slice)), float(np.max(cl_slice))),
-                (float(np.min(gt_slice)), float(np.max(gt_slice))),
-            )
-        return None, None
-
-    if data_kind == "batch":
-        ds = data_source
-        pair_idx, z = ds.indices[sample_idx]
-        label_path = ds.label_paths[pair_idx]
-        cond_path = ds.cond_paths[pair_idx]
-        if ds.normalization_mode in ("volume", "percentile"):
-            input_range = ds._normalization_ranges.get(cond_path)
-            label_range = ds._normalization_ranges.get(label_path)
-            if _valid_value_range(input_range) and _valid_value_range(label_range):
-                return input_range, label_range
-        x0, x1 = ds.crop_x
-        y0, y1 = ds.crop_y
-        cond_volume = ds._load_volume(cond_path)
-        label_volume = ds._load_volume(label_path)
-        cl_slice = cond_volume[x0:x1, y0:y1, z]
-        gt_slice = label_volume[x0:x1, y0:y1, z]
-        return (
-            (float(np.min(cl_slice)), float(np.max(cl_slice))),
-            (float(np.min(gt_slice)), float(np.max(gt_slice))),
-        )
-
-    return None, None
 
 
 def draw_centered_text(canvas, text, x0, x1, y, font_scale=0.8, thickness=2):
@@ -472,9 +410,7 @@ def save_slice_outputs(
     cl_img,
     result_img,
     gt_img=None,
-    input_range=None,
-    label_range=None,
-    unified_label_range=True,
+    metrics_align="none",
 ):
     """Save one slice and calculate its optional paired-image metrics."""
     slice_name = img_name if z_idx is None else f"{img_name}_z{z_idx:03d}"
@@ -488,9 +424,7 @@ def save_slice_outputs(
         result_for_compare, gt_img_metric = prepare_metric_images(
             result_img,
             gt_img,
-            input_range=input_range,
-            label_range=label_range,
-            unified_label_range=unified_label_range,
+            metrics_align=metrics_align,
         )
         p, s, m = indicate(result_for_compare[None, ...], gt_img_metric[None, ...])
         metrics = (float(p), float(s), float(m) * 1000)
@@ -567,8 +501,6 @@ def main():
             percentile_high=args.percentile_high,
             independent_raws=args.independent_raws,
         )
-        data_source = None
-        data_kind = "raw"
     elif args.input_npy:
         data = SingleCLVolumeDataset(
             input_npy=args.input_npy,
@@ -583,39 +515,30 @@ def main():
             percentile_high=args.percentile_high,
             independent_slices=args.independent_raws,
         )
-        data_source = data
-        data_kind = "volume"
     else:
-        if not args.data_dir1 or not args.data_dir2:
-            raise ValueError("data_dir1 and data_dir2 are required when input_npy is empty.")
-        pairs = _pair_npy_files(args.data_dir1, args.data_dir2)
-        data_source = CLVolumeSliceDataset(
-            label_paths=[label for label, _ in pairs],
-            cond_paths=[cond for _, cond in pairs],
+        data = load_CL_IMG_data(
+            data_dir1=args.data_dir1,
+            data_dir2=args.data_dir2,
+            batch_size=args.batch_size,
             image_size=args.image_size,
+            mode="test",
             num_input_slices=args.condition_channels,
-            crop_x=(args.crop_x_start, args.crop_x_end),
-            crop_y=(args.crop_y_start, args.crop_y_end),
+            crop_x_start=args.crop_x_start,
+            crop_x_end=args.crop_x_end,
+            crop_y_start=args.crop_y_start,
+            crop_y_end=args.crop_y_end,
             use_mmap=args.use_mmap,
             normalization_mode=args.normalization_mode,
             percentile_low=args.percentile_low,
             percentile_high=args.percentile_high,
-            augment_condition=False,
         )
-        print("Dataset size:", len(data_source))
-        data = DataLoader(
-            data_source,
-            batch_size=args.batch_size,
-            shuffle=False,
-            num_workers=0,
-            pin_memory=False,
-        )
-        data_kind = "batch"
 
-    if args.metrics_unified_label_range:
+    if args.metrics_align not in ("none", "affine"):
+        raise ValueError("metrics_align must be 'none' or 'affine'.")
+    if args.metrics_align == "affine":
         print(
-            "Metrics/comparison use unified GT label range: "
-            "pred is denormalized from CL window and renormalized to label window."
+            "Metrics/comparison use affine alignment: "
+            "pred_aligned = a * pred + b fitted to GT."
         )
 
     input_value_range = getattr(data, "input_range", None)
@@ -725,13 +648,6 @@ def main():
             if img is not None:
                 gt_img = np.squeeze(img[0].numpy() if hasattr(img, "numpy") else img).copy()
 
-            metric_input_range, metric_label_range = resolve_metric_ranges(
-                data_source,
-                data_kind,
-                sample_idx,
-                z_idx,
-            )
-
             output_futures.append(
                 output_executor.submit(
                     save_slice_outputs,
@@ -742,9 +658,7 @@ def main():
                     cl_img,
                     result_img,
                     gt_img,
-                    metric_input_range,
-                    metric_label_range,
-                    args.metrics_unified_label_range,
+                    args.metrics_align,
                 )
             )
 
@@ -858,8 +772,8 @@ def create_argparser():
         save_input_scale_npy=False,
         # Save PNG slices rendered from the input-scale reconstruction volume.
         save_input_scale_png=False,
-        # Remap pred from CL normalization window to GT label window before metrics/display.
-        metrics_unified_label_range=True,
+        # Align pred to GT before metrics/display: none | affine
+        metrics_align="affine",
 
         # [CT] label 模型训练路径
         # model_path="/home/lqg/code_8T/24/lt/CL_DIFF_v1/checkpoints/first_test/ema_npy_0.9999_250000.pt",
