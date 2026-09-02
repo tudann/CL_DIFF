@@ -1,0 +1,45 @@
+# Copy to preview_sharp_edges.local.yaml (gitignored).
+# This script only writes inspection PNGs. It does not train or sample.
+
+output_dir: "debug_sharp_edges"
+self_test: true              # 先看合成图：左锐边应绿、右糊边应红；确认后再关
+
+# 输入优先级与采样脚本相同：input_raw_dir > input_npy
+# 观察层间伪影时务必 false，才会用 [z-1, z, z+1]
+independent_raws: false
+
+input_raw_dir: ""
+raw_height: 1024
+raw_width: 1024
+raw_dtype: float32
+raw_pattern: "*.raw"
+raw_order: C
+raw_volume_name: real_fdk
+
+input_npy: "/home/lqg/code_8T/24/lt/data_make/CL-data_make/output/evulate_data/mpcb_phantom_npy/cl_fdk_npy/phantom_0001_cl_fdk.npy"
+label_npy: ""                # 真实 CL 通常没有 CT；有的话可对照梯度是否对齐
+
+crop_x_start: 127
+crop_x_end: 895
+crop_y_start: 127
+crop_y_end: 895
+image_size: 768
+condition_channels: 3
+normalization_mode: percentile
+percentile_low: 1.0
+percentile_high: 99.0
+
+# mid = 中间一层；auto = 均匀抽 max_slices 张；也可 "12,20,28"
+z_indices: mid
+max_slices: 5
+
+# 边沿分类阈值：看完图再调
+pre_sigma: 0.6               # 提边前轻微去噪，太大真锐边也会变糊
+fine_sigma: 0.8
+coarse_sigma: 2.5
+edge_percentile: 88.0        # 只保留梯度脊线里较强的像素；降到 80 会更密、更吵
+sharp_max_width: 3.0         # 半高宽 <= 此值为绿（候选真结构）
+blur_min_width: 5.0          # 半高宽 >= 此值为红（候选伪影）；中间是黄
+max_width_radius: 8
+unique_ratio: 1.35           # 当前层梯度显著强于邻层 → 青（焦平面候选）
+leak_mag_ratio: 1.5          # 泄漏图上够强的糊边 → 品红（鬼影候选）

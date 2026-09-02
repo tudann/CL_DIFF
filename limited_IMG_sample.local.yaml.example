@@ -42,6 +42,8 @@ save_re_npy: false
 normalize_output_volume: false
 save_input_scale_npy: false  # 需要 normalization_mode=volume 或 percentile，且非 independent_raws
 save_input_scale_png: false
+# 指标与对比图：将 pred 从 CL 窗口 remap 到 GT label 窗口后再计算 PSNR/SSIM
+metrics_unified_label_range: true
 
 # ==== 数据预处理 ====
 batch_size: 1
