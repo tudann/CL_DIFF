@@ -38,6 +38,7 @@ warm_start_strength: 0.25    # p_sample 专用；越小噪声越少，低对比�
 
 # ==== 输出选项 ====
 save_global_png: false
+save_xz_png: true            # 推理结束后导出全部 xz 切片（volume[:, y, :]）
 save_re_npy: false
 normalize_output_volume: false
 save_input_scale_npy: false  # 需要 normalization_mode=volume 或 percentile，且非 independent_raws

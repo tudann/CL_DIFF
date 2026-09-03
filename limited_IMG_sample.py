@@ -317,6 +317,17 @@ def to_uint8(img):
     return (np.clip(img, 0.0, 1.0) * 255).astype(np.uint8)
 
 
+def save_xz_pngs(volume, output_dir, stem):
+    """Save every xz slice from a (x, y, z) volume."""
+    os.makedirs(output_dir, exist_ok=True)
+    y_count = volume.shape[1]
+    for y_idx in range(y_count):
+        xz_slice = volume[:, y_idx, :]
+        png_path = os.path.join(output_dir, f"{stem}_xz_y{y_idx:03d}.png")
+        cv2.imwrite(png_path, to_uint8(xz_slice))
+    print(f"Saved {y_count} xz slices to {output_dir}")
+
+
 def normalize_volume(volume):
     """Normalize one complete H x W x Z volume with a shared value range."""
     min_value = float(np.min(volume))
@@ -581,6 +592,7 @@ def main():
 
     metrics_list = []
     volume_slices = []
+    gt_volume_slices = []
     output_futures = []
     with ThreadPoolExecutor(max_workers=1) as output_executor, th.inference_mode():
         for sample_idx, data_batch in enumerate(data):
@@ -647,6 +659,8 @@ def main():
             gt_img = None
             if img is not None:
                 gt_img = np.squeeze(img[0].numpy() if hasattr(img, "numpy") else img).copy()
+                if not per_file_raw:
+                    gt_volume_slices.append(np.clip(gt_img, 0.0, 1.0).astype(np.float32))
 
             output_futures.append(
                 output_executor.submit(
@@ -723,11 +737,36 @@ def main():
                     global_slice,
                 )
 
+        if args.save_xz_png:
+            xz_dir = os.path.join(args.output_dir, "xz")
+            save_xz_pngs(volume, xz_dir, img_name)
+            if gt_volume_slices and len(gt_volume_slices) == volume.shape[2]:
+                gt_volume = np.stack(gt_volume_slices, axis=-1)
+                save_xz_pngs(
+                    np.clip(gt_volume, 0.0, 1.0).astype(np.float32),
+                    os.path.join(args.output_dir, "xz_gt"),
+                    f"{img_name}_gt",
+                )
+
     if metrics_list:
+        psnrs = [float(row[1]) for row in metrics_list]
+        ssims = [float(row[2]) for row in metrics_list]
+        mses = [float(row[3]) for row in metrics_list]
+        mean_row = [
+            "MEAN",
+            float(np.mean(psnrs)),
+            float(np.mean(ssims)),
+            float(np.mean(mses)),
+        ]
         with open(os.path.join(args.output_dir, "image_metrics.csv"), mode="w", newline="") as file:
             writer = csv.writer(file)
             writer.writerow(["ImageName", "PSNR", "SSIM", "MSE"])
             writer.writerows(metrics_list)
+            writer.writerow(mean_row)
+        print(
+            f"Mean over {len(metrics_list)} slices: "
+            f"PSNR={mean_row[1]:.4f}  SSIM={mean_row[2]:.4f}  MSE(x1000)={mean_row[3]:.4f}"
+        )
 
 
 def create_argparser():
@@ -766,6 +805,7 @@ def create_argparser():
         p_sample_steps=50,
         warm_start_strength=0.25,
         save_global_png=False,
+        save_xz_png=True,
         save_re_npy=False,
         normalize_output_volume=False,
         # Also save the normalized reconstruction mapped to the input volume range.
