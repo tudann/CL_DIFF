@@ -18,7 +18,8 @@ from guided_diffusion import logger
 from guided_diffusion.image_datasets import (
     load_CL_IMG_data,
     normalize_image,
-    volume_value_range,
+    validate_normalization_mode,
+    volume_normalization_range,
 )
 from guided_diffusion.script_util import (
     add_dict_to_argparser,
@@ -40,6 +41,9 @@ class SingleCLVolumeDataset:
         crop_y=(127, 895),
         use_mmap=True,
         normalization_mode="volume",
+        percentile_low=1.0,
+        percentile_high=99.0,
+        independent_slices=False,
     ):
         if num_input_slices % 2 != 1:
             raise ValueError("num_input_slices must be odd, e.g. 3 for [z-1,z,z+1].")
@@ -53,9 +57,10 @@ class SingleCLVolumeDataset:
         self.num_input_slices = num_input_slices
         self.crop_x = crop_x
         self.crop_y = crop_y
-        if normalization_mode not in ("slice", "volume"):
-            raise ValueError("normalization_mode must be 'slice' or 'volume'.")
-        self.normalization_mode = normalization_mode
+        self.normalization_mode = validate_normalization_mode(normalization_mode)
+        self.percentile_low = float(percentile_low)
+        self.percentile_high = float(percentile_high)
+        self.independent_slices = bool(independent_slices)
         self.stem = os.path.splitext(os.path.basename(input_npy))[0]
 
         if self.input_volume.ndim != 3:
@@ -73,13 +78,20 @@ class SingleCLVolumeDataset:
 
         self.input_range = None
         self.label_range = None
-        if self.normalization_mode == "volume":
-            self.input_range = volume_value_range(
-                self.input_volume, self.crop_x, self.crop_y
+        if self.independent_slices:
+            print(
+                "Independent slice mode: each slice is repeated across all "
+                f"{self.num_input_slices} condition channels."
+            )
+        elif self.normalization_mode in ("volume", "percentile"):
+            self.input_range = volume_normalization_range(
+                self.input_volume, self.crop_x, self.crop_y,
+                self.normalization_mode, self.percentile_low, self.percentile_high,
             )
             if self.label_volume is not None:
-                self.label_range = volume_value_range(
-                    self.label_volume, self.crop_x, self.crop_y
+                self.label_range = volume_normalization_range(
+                    self.label_volume, self.crop_x, self.crop_y,
+                    self.normalization_mode, self.percentile_low, self.percentile_high,
                 )
 
     def __len__(self):
@@ -90,12 +102,26 @@ class SingleCLVolumeDataset:
             yield self[z]
 
     def __getitem__(self, z):
+        x0, x1 = self.crop_x
+        y0, y1 = self.crop_y
+        if self.independent_slices:
+            cropped = np.asarray(self.input_volume[x0:x1, y0:y1, z], dtype=np.float32)
+            normalized = normalize_image(cropped)
+            cond_stack = th.from_numpy(
+                np.stack([normalized] * self.num_input_slices, axis=0)[None].astype(np.float32)
+            )
+            label_slice = None
+            if self.label_volume is not None:
+                label_slice = np.asarray(
+                    self.label_volume[x0:x1, y0:y1, z], dtype=np.float32
+                )
+                label_slice = normalize_image(label_slice)[None].astype(np.float32)
+            return label_slice, cond_stack, f"{self.stem}_z{z:03d}"
+
         z_count = self.input_volume.shape[2]
         half = self.num_input_slices // 2
         z_indices = [min(max(z + offset, 0), z_count - 1) for offset in range(-half, half + 1)]
 
-        x0, x1 = self.crop_x
-        y0, y1 = self.crop_y
         cond_slices = [
             np.asarray(self.input_volume[x0:x1, y0:y1, zi], dtype=np.float32)
             for zi in z_indices
@@ -137,6 +163,9 @@ class SingleCLRawSliceDataset:
         raw_order="C",
         volume_name="",
         normalization_mode="volume",
+        percentile_low=1.0,
+        percentile_high=99.0,
+        independent_raws=False,
     ):
         if num_input_slices % 2 != 1:
             raise ValueError("num_input_slices must be odd, e.g. 3 for [z-1,z,z+1].")
@@ -154,9 +183,11 @@ class SingleCLRawSliceDataset:
         self.raw_width = raw_width
         self.raw_dtype = np.dtype(raw_dtype)
         self.raw_order = raw_order
-        if normalization_mode not in ("slice", "volume"):
-            raise ValueError("normalization_mode must be 'slice' or 'volume'.")
-        self.normalization_mode = normalization_mode
+        self.independent_raws = bool(independent_raws)
+        requested_mode = validate_normalization_mode(normalization_mode)
+        self.percentile_low = float(percentile_low)
+        self.percentile_high = float(percentile_high)
+        self.normalization_mode = "slice" if self.independent_raws else requested_mode
         self.expected_values = raw_height * raw_width
         self.stem = volume_name or os.path.basename(os.path.abspath(input_raw_dir))
 
@@ -166,7 +197,13 @@ class SingleCLRawSliceDataset:
             raise ValueError(f"Crop size ({crop_h}, {crop_w}) does not match image_size={image_size}.")
 
         self.input_range = None
-        if self.normalization_mode == "volume":
+        self.slice_ranges = [None] * len(self.raw_files)
+        if self.independent_raws:
+            print(
+                f"Independent RAW mode: repeating each file across "
+                f"{self.num_input_slices} condition channels."
+            )
+        elif self.normalization_mode in ("volume", "percentile"):
             self.input_range = self._compute_volume_range()
 
     def __len__(self):
@@ -189,6 +226,14 @@ class SingleCLRawSliceDataset:
     def _compute_volume_range(self):
         x0, x1 = self.crop_x
         y0, y1 = self.crop_y
+        if self.normalization_mode == "percentile":
+            values = np.concatenate([
+                self._read_raw_slice(z)[x0:x1, y0:y1].ravel()
+                for z in range(len(self))
+            ])
+            low = float(np.percentile(values, self.percentile_low))
+            high = float(np.percentile(values, self.percentile_high))
+            return (low, high) if high > low else (float(np.min(values)), float(np.max(values)))
         min_value = float("inf")
         max_value = float("-inf")
         for z in range(len(self)):
@@ -198,12 +243,22 @@ class SingleCLRawSliceDataset:
         return min_value, max_value
 
     def __getitem__(self, z):
+        x0, x1 = self.crop_x
+        y0, y1 = self.crop_y
+        if self.independent_raws:
+            cropped = np.asarray(self._read_raw_slice(z)[x0:x1, y0:y1], dtype=np.float32)
+            self.slice_ranges[z] = (float(np.min(cropped)), float(np.max(cropped)))
+            normalized = normalize_image(cropped)
+            cond_stack = th.from_numpy(
+                np.stack([normalized] * self.num_input_slices, axis=0)[None].astype(np.float32)
+            )
+            sample_name = os.path.splitext(os.path.basename(self.raw_files[z]))[0]
+            return None, cond_stack, sample_name
+
         z_count = len(self)
         half = self.num_input_slices // 2
         z_indices = [min(max(z + offset, 0), z_count - 1) for offset in range(-half, half + 1)]
 
-        x0, x1 = self.crop_x
-        y0, y1 = self.crop_y
         cond_slices = [
             np.asarray(self._read_raw_slice(zi)[x0:x1, y0:y1], dtype=np.float32)
             for zi in z_indices
@@ -238,6 +293,16 @@ def to_uint8(img):
     return (np.clip(img, 0.0, 1.0) * 255).astype(np.uint8)
 
 
+def save_xz_pngs(volume, output_dir, stem):
+    """Save all xz views from an (x, y, z) volume."""
+    os.makedirs(output_dir, exist_ok=True)
+    for y_idx in range(volume.shape[1]):
+        cv2.imwrite(
+            os.path.join(output_dir, f"{stem}_xz_y{y_idx:03d}.png"),
+            to_uint8(volume[:, y_idx, :]),
+        )
+
+
 def normalize_volume(volume):
     """Normalize one complete H x W x Z volume with a shared value range."""
     min_value = float(np.min(volume))
@@ -246,6 +311,31 @@ def normalize_volume(volume):
         return np.zeros_like(volume, dtype=np.float32), min_value, max_value
     normalized = (volume - min_value) / (max_value - min_value)
     return normalized.astype(np.float32), min_value, max_value
+
+
+def affine_align_pred_to_gt(pred, gt):
+    """Fit pred_aligned = scale * pred + bias to the label."""
+    pred = np.clip(pred.astype(np.float64), 0.0, 1.0)
+    gt = np.clip(gt.astype(np.float64), 0.0, 1.0)
+    x = pred.ravel()
+    y = gt.ravel()
+    if np.allclose(x, x[0]):
+        aligned = pred + float(np.mean(y - x))
+    else:
+        design = np.stack([x, np.ones_like(x)], axis=1)
+        scale, bias = np.linalg.lstsq(design, y, rcond=None)[0]
+        aligned = scale * pred + bias
+    return np.clip(aligned, 0.0, 1.0).astype(np.float32)
+
+
+def prepare_metric_images(pred, gt, metrics_align="none"):
+    pred_metric = np.clip(pred, 0.0, 1.0).astype(np.float32)
+    gt_metric = np.clip(gt, 0.0, 1.0).astype(np.float32)
+    if metrics_align == "affine":
+        pred_metric = affine_align_pred_to_gt(pred_metric, gt_metric)
+    elif metrics_align != "none":
+        raise ValueError("metrics_align must be 'none' or 'affine'.")
+    return pred_metric, gt_metric
 
 
 def draw_centered_text(canvas, text, x0, x1, y, font_scale=0.8, thickness=2):
@@ -297,28 +387,36 @@ def save_comparison(path, cl_img, re_img, gt_img=None, metrics=None):
     cv2.imwrite(path, canvas)
 
 
-def save_slice_outputs(re_dir, comp_dir, img_name, z_idx, cl_img, result_img, gt_img=None):
+def save_slice_outputs(
+    re_dir, comp_dir, img_name, z_idx, cl_img, result_img, gt_img=None,
+    metrics_align="none",
+):
     """Save one slice and calculate its optional paired-image metrics."""
-    slice_name = f"{img_name}_z{z_idx:03d}"
+    slice_name = img_name if z_idx is None else f"{img_name}_z{z_idx:03d}"
     re_path = os.path.join(re_dir, f"{slice_name}.png")
     cv2.imwrite(re_path, to_uint8(result_img))
 
     metrics = None
     metrics_row = None
+    result_for_compare = result_img
     if gt_img is not None:
-        result_img_norm = np.clip(result_img, 0.0, 1.0)
-        gt_img_norm = np.clip(gt_img, 0.0, 1.0)
-        p, s, m = indicate(result_img_norm[None, ...], gt_img_norm[None, ...])
+        result_for_compare, gt_img = prepare_metric_images(
+            result_img, gt_img, metrics_align
+        )
+        p, s, m = indicate(result_for_compare[None, ...], gt_img[None, ...])
         metrics = (float(p), float(s), float(m) * 1000)
         metrics_row = [slice_name, metrics[0], metrics[1], metrics[2]]
 
     comp_path = os.path.join(comp_dir, f"{slice_name}_comparison.png")
-    save_comparison(comp_path, cl_img, result_img, gt_img=gt_img, metrics=metrics)
+    save_comparison(comp_path, cl_img, result_for_compare, gt_img=gt_img, metrics=metrics)
     return metrics_row
 
 
 def main():
     args = create_argparser().parse_args()
+    if args.independent_raws and not args.input_raw_dir and not args.input_npy:
+        print("independent_raws is ignored in paired directory mode.")
+        args.independent_raws = False
     if args.sampler == "ddim":
         # True conditional DDIM with the configured number of steps.
         if args.ddim_steps <= 0:
@@ -372,6 +470,9 @@ def main():
             raw_order=args.raw_order,
             volume_name=args.raw_volume_name,
             normalization_mode=args.normalization_mode,
+            percentile_low=args.percentile_low,
+            percentile_high=args.percentile_high,
+            independent_raws=args.independent_raws,
         )
     elif args.input_npy:
         data = SingleCLVolumeDataset(
@@ -383,6 +484,9 @@ def main():
             crop_y=(args.crop_y_start, args.crop_y_end),
             use_mmap=args.use_mmap,
             normalization_mode=args.normalization_mode,
+            percentile_low=args.percentile_low,
+            percentile_high=args.percentile_high,
+            independent_slices=args.independent_raws,
         )
     else:
         data = load_CL_IMG_data(
@@ -398,7 +502,21 @@ def main():
             crop_y_end=args.crop_y_end,
             use_mmap=args.use_mmap,
             normalization_mode=args.normalization_mode,
+            percentile_low=args.percentile_low,
+            percentile_high=args.percentile_high,
         )
+
+    if args.metrics_align not in ("none", "affine"):
+        raise ValueError("metrics_align must be 'none' or 'affine'.")
+    input_range = getattr(data, "input_range", None)
+    if (args.save_input_scale_npy or args.save_input_scale_png) and not args.independent_raws:
+        if input_range is None or args.normalization_mode not in ("volume", "percentile"):
+            raise ValueError("Input-scale output requires volume or percentile normalization.")
+        input_min, input_max = input_range
+        if not np.isfinite(input_min) or not np.isfinite(input_max) or input_max <= input_min:
+            raise ValueError(f"Invalid input normalization range: {input_range}")
+    else:
+        input_min = input_max = None
 
     if args.sampler == "ddim":
         run_sampler = partial(diffusion.CL_IMG_ddim_sample_loop_test, eta=0.0)
@@ -412,13 +530,17 @@ def main():
         )
     re_dir = os.path.join(args.output_dir, "re")
     global_re_dir = os.path.join(args.output_dir, "re_global")
+    input_scale_re_dir = os.path.join(args.output_dir, "re_input_scale")
     comp_dir = os.path.join(args.output_dir, "comparison")
     os.makedirs(re_dir, exist_ok=True)
     os.makedirs(global_re_dir, exist_ok=True)
+    if args.save_input_scale_png:
+        os.makedirs(input_scale_re_dir, exist_ok=True)
     os.makedirs(comp_dir, exist_ok=True)
 
     metrics_list = []
     volume_slices = []
+    gt_volume_slices = []
     output_futures = []
     with ThreadPoolExecutor(max_workers=1) as output_executor, th.inference_mode():
         for sample_idx, data_batch in enumerate(data):
@@ -428,8 +550,12 @@ def main():
             img, bad_img, sample_name = data_batch
             if isinstance(sample_name, (list, tuple)):
                 sample_name = sample_name[0]
-            img_name = sample_name.rsplit("_z", 1)[0]
-            z_idx = int(sample_name.rsplit("_z", 1)[1])
+            per_file_raw = bool(args.input_raw_dir and args.independent_raws)
+            if per_file_raw:
+                img_name, z_idx = sample_name, None
+            else:
+                img_name = sample_name.rsplit("_z", 1)[0]
+                z_idx = int(sample_name.rsplit("_z", 1)[1])
 
             cond_img = bad_img.to(device, non_blocking=True)
             center_channel = cond_img.shape[1] // 2
@@ -443,11 +569,33 @@ def main():
                 img_bz=cond_img,
             )
             result_img = np.squeeze(result_img[0, 0].cpu().numpy()).copy()
-            volume_slices.append(result_img.astype(np.float32))
+            if not per_file_raw:
+                volume_slices.append(result_img.astype(np.float32))
+            elif args.save_re_npy or args.save_input_scale_npy or args.save_input_scale_png:
+                result_norm = np.clip(result_img, 0.0, 1.0).astype(np.float32)
+                if args.save_re_npy:
+                    np.save(os.path.join(args.output_dir, f"{img_name}_re.npy"), result_norm)
+                if args.save_input_scale_npy or args.save_input_scale_png:
+                    slice_min, slice_max = data.slice_ranges[sample_idx]
+                    if slice_max <= slice_min:
+                        raise ValueError(f"Invalid input range for {img_name}: {(slice_min, slice_max)}")
+                    input_scale_slice = result_norm * (slice_max - slice_min) + slice_min
+                    if args.save_input_scale_npy:
+                        np.save(
+                            os.path.join(args.output_dir, f"{img_name}_re_input_scale.npy"),
+                            input_scale_slice.astype(np.float32),
+                        )
+                    if args.save_input_scale_png:
+                        cv2.imwrite(
+                            os.path.join(input_scale_re_dir, f"{img_name}.png"),
+                            to_uint8(result_norm),
+                        )
 
             gt_img = None
             if img is not None:
                 gt_img = np.squeeze(img[0].numpy() if hasattr(img, "numpy") else img).copy()
+                if not per_file_raw:
+                    gt_volume_slices.append(np.clip(gt_img, 0.0, 1.0).astype(np.float32))
 
             output_futures.append(
                 output_executor.submit(
@@ -459,6 +607,7 @@ def main():
                     cl_img,
                     result_img,
                     gt_img,
+                    args.metrics_align,
                 )
             )
 
@@ -472,7 +621,26 @@ def main():
             volume, _, _ = normalize_volume(volume)
         else:
             volume = np.clip(volume, 0.0, 1.0).astype(np.float32)
-        np.save(os.path.join(args.output_dir, f"{img_name}_re.npy"), volume)
+        if args.save_re_npy:
+            np.save(os.path.join(args.output_dir, f"{img_name}_re.npy"), volume)
+        if args.save_input_scale_npy or args.save_input_scale_png:
+            input_scale_volume = (volume * (input_max - input_min) + input_min).astype(np.float32)
+            if args.save_input_scale_npy:
+                np.save(
+                    os.path.join(args.output_dir, f"{img_name}_re_input_scale.npy"),
+                    input_scale_volume,
+                )
+            if args.save_input_scale_png:
+                for output_z in range(input_scale_volume.shape[2]):
+                    scaled = np.clip(
+                        (input_scale_volume[:, :, output_z] - input_min) / (input_max - input_min),
+                        0.0,
+                        1.0,
+                    )
+                    cv2.imwrite(
+                        os.path.join(input_scale_re_dir, f"{img_name}_z{output_z:03d}.png"),
+                        to_uint8(scaled),
+                    )
         print(
             f"Output volume before saving: min={volume_min:.6g}, "
             f"max={volume_max:.6g}, normalized={args.normalize_output_volume}"
@@ -485,12 +653,31 @@ def main():
                     os.path.join(global_re_dir, f"{img_name}_z{z_idx:03d}.png"),
                     global_slice,
                 )
+        if args.save_xz_png:
+            save_xz_pngs(volume, os.path.join(args.output_dir, "xz"), img_name)
+            if len(gt_volume_slices) == volume.shape[2]:
+                save_xz_pngs(
+                    np.stack(gt_volume_slices, axis=-1),
+                    os.path.join(args.output_dir, "xz_gt"),
+                    f"{img_name}_gt",
+                )
 
     if metrics_list:
+        mean_row = [
+            "MEAN",
+            float(np.mean([row[1] for row in metrics_list])),
+            float(np.mean([row[2] for row in metrics_list])),
+            float(np.mean([row[3] for row in metrics_list])),
+        ]
         with open(os.path.join(args.output_dir, "image_metrics.csv"), mode="w", newline="") as file:
             writer = csv.writer(file)
             writer.writerow(["ImageName", "PSNR", "SSIM", "MSE"])
             writer.writerows(metrics_list)
+            writer.writerow(mean_row)
+        print(
+            f"Mean metrics: PSNR={mean_row[1]:.4f}, SSIM={mean_row[2]:.4f}, "
+            f"MSE(x1000)={mean_row[3]:.4f}"
+        )
 
 
 def create_argparser():
@@ -510,6 +697,7 @@ def create_argparser():
         raw_pattern="*.raw",
         raw_order="C",
         raw_volume_name="real_fdk",
+        independent_raws=False,
 
         # # 同源phantom路径
         # input_npy="/home/lqg/code_8T/24/lt/data_make/CL-data_make/output/evulate_data/pcb_phantom_npy/cl_fdk_npy/test_phantom_0001_cl_fdk.npy",
@@ -525,7 +713,12 @@ def create_argparser():
         p_sample_steps=50,
         warm_start_strength=0.8,
         save_global_png=False,
+        save_xz_png=False,
+        save_re_npy=True,
         normalize_output_volume=False,
+        save_input_scale_npy=False,
+        save_input_scale_png=False,
+        metrics_align="none",
 
         # [CT] label 模型训练路径
         # model_path="/home/lqg/code_8T/24/lt/CL_DIFF_v1/checkpoints/first_test/ema_npy_0.9999_250000.pt",
@@ -564,6 +757,8 @@ def create_argparser():
         crop_y_end=895,
         use_mmap=True,
         normalization_mode="volume",
+        percentile_low=1.0,
+        percentile_high=99.0,
     )
     config_path = local_config_path("sample")
     defaults = load_local_config(defaults, config_path)

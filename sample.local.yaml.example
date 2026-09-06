@@ -1,5 +1,6 @@
 # Copy to sample.ymal on the remote server, then edit paths and values.
-# Use either input_raw_dir, input_npy, or data_dir1/data_dir2 as the input.
+# Input priority: input_raw_dir > input_npy > data_dir1/data_dir2.
+# To calculate metrics, use input_npy + label_npy, or paired data directories.
 
 gpu_id: 0
 input_raw_dir: /path/to/inference/raw_slices
@@ -9,10 +10,11 @@ raw_dtype: float32
 raw_pattern: "*.raw"
 raw_order: C
 raw_volume_name: inference_volume
+independent_raws: false      # true: test each slice independently, without z-neighbors
 input_npy: ""
-label_npy: ""
-data_dir1: ""
-data_dir2: ""
+label_npy: ""               # CT/ground-truth label for input_npy; enables metrics
+data_dir1: ""               # paired CT/ground-truth NPY directory
+data_dir2: ""               # paired CL/input NPY directory
 model_path: /path/to/checkpoints/ema_npy_0.9999_150000.pt
 output_dir: result/inference_run
 sampler: ddim
@@ -20,7 +22,12 @@ ddim_steps: 25
 p_sample_steps: 50
 warm_start_strength: 0.8
 save_global_png: false
+save_xz_png: false
+save_re_npy: true
 normalize_output_volume: false
+save_input_scale_npy: false
+save_input_scale_png: false
+metrics_align: none          # none: direct metrics; affine: fit scale/bias before metrics
 max_samples: 0
 slover_data: "no"
 
@@ -53,4 +60,6 @@ crop_x_end: 895
 crop_y_start: 127
 crop_y_end: 895
 use_mmap: true
-normalization_mode: volume
+normalization_mode: volume   # slice / volume / percentile
+percentile_low: 1.0
+percentile_high: 99.0
