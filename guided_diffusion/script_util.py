@@ -1,4 +1,11 @@
 import argparse
+import os
+import sys
+
+try:
+    import yaml
+except ImportError:  # pragma: no cover - only needed when using a local YAML file
+    yaml = None
 
 from guided_diffusion import gaussian_diffusion as gd
 from .respace import SpacedDiffusion, space_timesteps
@@ -177,6 +184,54 @@ def add_dict_to_argparser(parser, default_dict):
         elif isinstance(v, bool):
             v_type = str2bool
         parser.add_argument(f"--{k}", default=v, type=v_type)
+
+
+def local_config_path(script_name=None, argv=None):
+    """Return the local YAML path requested on CLI, env, or convention."""
+    argv = sys.argv[1:] if argv is None else list(argv)
+    for index, arg in enumerate(argv):
+        if arg.startswith("--config="):
+            return arg.split("=", 1)[1]
+        if arg == "--config" and index + 1 < len(argv):
+            return argv[index + 1]
+    configured = os.environ.get("LAMINO_CONFIG")
+    if configured:
+        return configured
+    candidates = []
+    if script_name:
+        candidates.extend(
+            [
+                f"{script_name}.ymal",
+                f"{script_name}.yaml",
+                f".{script_name}.local.yaml",
+                f".{script_name}.local.ymal",
+            ]
+        )
+        if script_name == "sample":
+            candidates.insert(1, "sampl.ymal")
+    candidates.extend([".local.yaml", ".local.ymal"])
+    return next((candidate for candidate in candidates if os.path.isfile(candidate)), candidates[0])
+
+
+def load_local_config(defaults, path=None):
+    """Overlay defaults with values from an optional, untracked YAML file.
+
+    Command-line arguments still take precedence because this function is called
+    before the argparse parser is populated. Keys for another entry point are
+    ignored so one shared file can contain both training and inference settings.
+    """
+    path = path or local_config_path()
+    if not path or not os.path.isfile(path):
+        return defaults
+    if yaml is None:
+        raise RuntimeError("PyYAML is required to read the local configuration file.")
+    with open(path, "r", encoding="utf-8") as handle:
+        values = yaml.safe_load(handle) or {}
+    if not isinstance(values, dict):
+        raise ValueError(f"Local config {path} must contain a YAML mapping.")
+    merged = dict(defaults)
+    merged.update({key: value for key, value in values.items() if key in defaults})
+    return merged
 
 
 def args_to_dict(args, keys):

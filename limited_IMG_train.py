@@ -17,7 +17,13 @@ except ImportError:
 from guided_diffusion import logger #分布式训练相关工具；
 from guided_diffusion.image_datasets import  load_CL_IMG_data #加载训练数据；
 from guided_diffusion.resample import create_named_schedule_sampler #训练时用于 schedule sampling 的工具；
-from guided_diffusion.script_util import (args_to_dict, add_dict_to_argparser, CL_IMG_create_model_and_diffusion) #模型创建、默认参数等；
+from guided_diffusion.script_util import (
+    args_to_dict,
+    add_dict_to_argparser,
+    load_local_config,
+    local_config_path,
+    CL_IMG_create_model_and_diffusion,
+) #模型创建、默认参数等；
 import torch as th
 from guided_diffusion.train_util import TrainLoop  #训练核心循环逻辑；
 
@@ -250,7 +256,14 @@ def create_argparser():
         fp16_scale_growth=1e-3,
     )
 
+    config_path = local_config_path("train")
+    defaults = load_local_config(defaults, config_path)
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--config",
+        default=config_path,
+        help="Optional YAML config file (default: train.ymal).",
+    )
     add_dict_to_argparser(parser, defaults)
     return parser
 

@@ -20,7 +20,13 @@ from guided_diffusion.image_datasets import (
     normalize_image,
     volume_value_range,
 )
-from guided_diffusion.script_util import add_dict_to_argparser, args_to_dict, CL_IMG_create_model_and_diffusion
+from guided_diffusion.script_util import (
+    add_dict_to_argparser,
+    args_to_dict,
+    load_local_config,
+    local_config_path,
+    CL_IMG_create_model_and_diffusion,
+)
 
 
 class SingleCLVolumeDataset:
@@ -511,8 +517,8 @@ def create_argparser():
         # mpcb路径
         input_npy="/home/lqg/code_8T/24/lt/data_make/CL-data_make/output/evulate_data/mpcb_phantom_npy/cl_fdk_npy/phantom_0001_cl_fdk.npy",
         label_npy="/home/lqg/code_8T/24/lt/data_make/CL-data_make/output/evulate_data/mpcb_phantom_npy/phantom_0001.npy",
-        # data_dir1="/home/lqg/code_8T/24/lt/data_make/CL-data_make/ct_label_npy",
-        # data_dir2="/home/lqg/code_8T/24/lt/data_make/CL-data_make/cl_label_npy",
+        data_dir1="",
+        data_dir2="",
         batch_size=1,
         sampler="p_sample",  # ddim or p_sample
         ddim_steps=25,
@@ -559,7 +565,14 @@ def create_argparser():
         use_mmap=True,
         normalization_mode="volume",
     )
+    config_path = local_config_path("sample")
+    defaults = load_local_config(defaults, config_path)
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--config",
+        default=config_path,
+        help="Optional YAML config file (default: sample.ymal).",
+    )
     add_dict_to_argparser(parser, defaults)
     return parser
 

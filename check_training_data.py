@@ -5,7 +5,7 @@ import imageio.v2 as imageio
 import numpy as np
 
 from guided_diffusion.image_datasets import CLVolumeSliceDataset, _pair_npy_files
-from guided_diffusion.script_util import add_dict_to_argparser
+from guided_diffusion.script_util import add_dict_to_argparser, load_local_config, local_config_path
 
 
 def summarize_array(name, arr):
@@ -109,7 +109,10 @@ def create_argparser():
         save_preview=True,
         preview_output_dir="debug_data_preview",
     )
+    config_path = local_config_path("train")
+    defaults = load_local_config(defaults, config_path)
     parser = argparse.ArgumentParser()
+    parser.add_argument("--config", default=config_path, help="Optional YAML config file (default: train.ymal).")
     add_dict_to_argparser(parser, defaults)
     return parser
 
