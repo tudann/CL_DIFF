@@ -295,22 +295,60 @@ class SingleCLRawSliceDataset:
         return None, cond_stack, f"{self.stem}_z{z:03d}"
 
 
+def correlation_coefficient(img1, img2):
+    """Return the Pearson correlation coefficient of two image arrays."""
+    x = np.asarray(img1, dtype=np.float64).ravel()
+    y = np.asarray(img2, dtype=np.float64).ravel()
+    x_centered = x - np.mean(x)
+    y_centered = y - np.mean(y)
+    denominator = float(np.sqrt(np.dot(x_centered, x_centered) * np.dot(y_centered, y_centered)))
+    if denominator == 0.0:
+        # A pair of identical constant images is perfectly correlated.  If only
+        # one image is constant, Pearson correlation is undefined; report 0.
+        return 1.0 if np.array_equal(x, y) else 0.0
+    return float(np.clip(np.dot(x_centered, y_centered) / denominator, -1.0, 1.0))
+
+
+def binary_difference_map_agreement(img1, img2):
+    """Return Otsu-binarized pixel agreement as a percentage in [0, 100]."""
+    # Otsu is applied independently to reconstruction and reference, as each
+    # image can have a different intensity range after metric preparation.
+    binary1 = cv2.threshold(
+        to_uint8(img1), 0, 1, cv2.THRESH_BINARY + cv2.THRESH_OTSU
+    )[1]
+    binary2 = cv2.threshold(
+        to_uint8(img2), 0, 1, cv2.THRESH_BINARY + cv2.THRESH_OTSU
+    )[1]
+    return float(np.mean(binary1 == binary2) * 100.0)
+
+
 def indicate(img1, img2):
+    """Calculate PSNR, SSIM, MSE, CC, and BDM for one image or a batch."""
     if len(img1.shape) == 3:
         batch = img1.shape[0]
         psnr0 = np.zeros(batch)
         ssim0 = np.zeros(batch)
         mse0 = np.zeros(batch)
+        cc0 = np.zeros(batch)
+        bdm0 = np.zeros(batch)
         for i in range(batch):
             t1 = np.clip(img1[i, ...], 0.0, 1.0)
             t2 = np.clip(img2[i, ...], 0.0, 1.0)
             psnr0[i] = psnr(t1, t2, data_range=1)
             ssim0[i] = ssim(t1, t2, data_range=1)
             mse0[i] = mse(t1, t2)
-        return psnr0, ssim0, mse0
+            cc0[i] = correlation_coefficient(t1, t2)
+            bdm0[i] = binary_difference_map_agreement(t1, t2)
+        return psnr0, ssim0, mse0, cc0, bdm0
     img1 = np.clip(img1, 0.0, 1.0)
     img2 = np.clip(img2, 0.0, 1.0)
-    return psnr(img1, img2, data_range=1), ssim(img1, img2, data_range=1), mse(img1, img2)
+    return (
+        psnr(img1, img2, data_range=1),
+        ssim(img1, img2, data_range=1),
+        mse(img1, img2),
+        correlation_coefficient(img1, img2),
+        binary_difference_map_agreement(img1, img2),
+    )
 
 
 def to_uint8(img):
@@ -389,8 +427,11 @@ def save_comparison(path, cl_img, re_img, gt_img=None, metrics=None):
     canvas = np.full((canvas_h, canvas_w, 3), 255, dtype=np.uint8)
 
     if metrics is not None:
-        p, s, m = metrics
-        metric_text = f"PSNR: {p:.2f}  SSIM: {s:.4f}  MSE(x1000): {m:.3f}"
+        p, s, m, c, b = metrics
+        metric_text = (
+            f"PSNR: {p:.2f}  SSIM: {s:.4f}  MSE(x1000): {m:.3f}  "
+            f"CC: {c:.4f}  BDM: {b:.2f}%"
+        )
     else:
         metric_text = "No CT label: metrics unavailable"
     cv2.putText(
@@ -437,9 +478,9 @@ def save_slice_outputs(
             gt_img,
             metrics_align=metrics_align,
         )
-        p, s, m = indicate(result_for_compare[None, ...], gt_img_metric[None, ...])
-        metrics = (float(p), float(s), float(m) * 1000)
-        metrics_row = [slice_name, metrics[0], metrics[1], metrics[2]]
+        p, s, m, c, b = indicate(result_for_compare[None, ...], gt_img_metric[None, ...])
+        metrics = (float(p), float(s), float(m) * 1000, float(c), float(b))
+        metrics_row = [slice_name, metrics[0], metrics[1], metrics[2], metrics[3], metrics[4]]
         gt_img = gt_img_metric
 
     comp_path = os.path.join(comp_dir, f"{slice_name}_comparison.png")
@@ -752,20 +793,25 @@ def main():
         psnrs = [float(row[1]) for row in metrics_list]
         ssims = [float(row[2]) for row in metrics_list]
         mses = [float(row[3]) for row in metrics_list]
+        ccs = [float(row[4]) for row in metrics_list]
+        bdms = [float(row[5]) for row in metrics_list]
         mean_row = [
             "MEAN",
             float(np.mean(psnrs)),
             float(np.mean(ssims)),
             float(np.mean(mses)),
+            float(np.mean(ccs)),
+            float(np.mean(bdms)),
         ]
         with open(os.path.join(args.output_dir, "image_metrics.csv"), mode="w", newline="") as file:
             writer = csv.writer(file)
-            writer.writerow(["ImageName", "PSNR", "SSIM", "MSE"])
+            writer.writerow(["ImageName", "PSNR", "SSIM", "MSE(x1000)", "CC", "BDM(%)"])
             writer.writerows(metrics_list)
             writer.writerow(mean_row)
         print(
             f"Mean over {len(metrics_list)} slices: "
-            f"PSNR={mean_row[1]:.4f}  SSIM={mean_row[2]:.4f}  MSE(x1000)={mean_row[3]:.4f}"
+            f"PSNR={mean_row[1]:.4f}  SSIM={mean_row[2]:.4f}  "
+            f"MSE(x1000)={mean_row[3]:.4f}  CC={mean_row[4]:.4f}  BDM={mean_row[5]:.2f}%"
         )
 
 
