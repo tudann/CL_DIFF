@@ -309,16 +309,19 @@ def correlation_coefficient(img1, img2):
     return float(np.clip(np.dot(x_centered, y_centered) / denominator, -1.0, 1.0))
 
 
+def otsu_binarize(img):
+    """Binarize one normalized grayscale image with an Otsu threshold."""
+    return cv2.threshold(
+        to_uint8(img), 0, 1, cv2.THRESH_BINARY + cv2.THRESH_OTSU
+    )[1].astype(np.float32)
+
+
 def binary_difference_map_agreement(img1, img2):
     """Return Otsu-binarized pixel agreement as a percentage in [0, 100]."""
     # Otsu is applied independently to reconstruction and reference, as each
     # image can have a different intensity range after metric preparation.
-    binary1 = cv2.threshold(
-        to_uint8(img1), 0, 1, cv2.THRESH_BINARY + cv2.THRESH_OTSU
-    )[1]
-    binary2 = cv2.threshold(
-        to_uint8(img2), 0, 1, cv2.THRESH_BINARY + cv2.THRESH_OTSU
-    )[1]
+    binary1 = otsu_binarize(img1)
+    binary2 = otsu_binarize(img2)
     return float(np.mean(binary1 == binary2) * 100.0)
 
 
@@ -634,6 +637,7 @@ def main():
     metrics_list = []
     volume_slices = []
     gt_volume_slices = []
+    binary_volume_slices = []
     output_futures = []
     with ThreadPoolExecutor(max_workers=1) as output_executor, th.inference_mode():
         for sample_idx, data_batch in enumerate(data):
@@ -663,6 +667,10 @@ def main():
                 img_bz=cond_img,
             )
             result_img = np.squeeze(result_img[0, 0].cpu().numpy()).copy()
+            if args.save_binary_xz_png:
+                # Keep this independent of GT availability: real RAW tests
+                # can export binary XZ views without computing BDM.
+                binary_volume_slices.append(otsu_binarize(result_img))
             if not per_file_raw:
                 volume_slices.append(result_img.astype(np.float32))
             elif args.save_re_npy or args.save_input_scale_npy or args.save_input_scale_png:
@@ -789,6 +797,19 @@ def main():
                     f"{img_name}_gt",
                 )
 
+    if args.save_binary_xz_png and binary_volume_slices:
+        binary_volume = np.stack(binary_volume_slices, axis=-1)
+        binary_stem = getattr(data, "stem", "reconstruction")
+        save_xz_pngs(
+            binary_volume,
+            os.path.join(args.output_dir, "xz_binary"),
+            f"{binary_stem}_binary",
+        )
+        print(
+            f"Saved Otsu-binarized reconstruction XZ slices to "
+            f"{os.path.join(args.output_dir, 'xz_binary')}"
+        )
+
     if metrics_list:
         psnrs = [float(row[1]) for row in metrics_list]
         ssims = [float(row[2]) for row in metrics_list]
@@ -852,6 +873,7 @@ def create_argparser():
         warm_start_strength=0.25,
         save_global_png=False,
         save_xz_png=True,
+        save_binary_xz_png=False,
         save_re_npy=False,
         normalize_output_volume=False,
         # Also save the normalized reconstruction mapped to the input volume range.
